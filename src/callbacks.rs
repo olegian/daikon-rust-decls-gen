@@ -2,12 +2,12 @@ use crate::decls;
 
 #[derive(Default)]
 pub struct ConstructDecls {
-    ppts: Vec<decls::ProgramPoint>
+    decls: decls::DeclsFile,
 }
 
 impl ConstructDecls {
     pub fn into_decls_file(self) -> decls::DeclsFile {
-        todo!()
+        self.decls
     }
 }
 
@@ -42,15 +42,24 @@ impl rustc_driver::Callbacks for ConstructDecls {
                         } => {
                             let file_name = get_containing_file_name(compiler, item.span);
                             let ppt_name = format!("{}.{}", file_name, ident.as_str());
+                            let (ppt_name, mut enter_ppt) = decls::ProgramPoint::enter(&ppt_name);
+
                             let body = tcx.hir_body(body);
+                            let param_names = body.params.iter().map(|param| {
+                                param
+                                    .pat
+                                    .simple_ident()
+                                    .expect(
+                                        "Encountered input parameter with non-simple ident pat.",
+                                    )
+                                    .to_string()
+                            });
 
-                            let mut enter_ppt = decls::ProgramPoint::empty(
-                                ppt_name.clone(),
-                                decls::ProgramPointType::Enter,
-                            );
-                            enter_ppt.include_fn_formals(&tcx, body, sig.decl);
+                            let sig = tcx.fn_sig(ldid).instantiate_identity().skip_binder();
+                            let inputs = param_names.zip(sig.inputs());
+                            enter_ppt.include_fn_inputs(&tcx, inputs);
 
-                            self.ppts.push(enter_ppt);
+                            self.decls.add_program_point(ppt_name, enter_ppt);
                         }
                         rustc_hir::ItemKind::Enum(ident, generics, enum_def) => {
                             let file_name = get_containing_file_name(compiler, item.span);
