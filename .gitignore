@@ -1,2 +1,2 @@
 /target
-*.decls
+tests/*/*.decls

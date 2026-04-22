@@ -24,4 +24,4 @@ fn foo(p1: MyEnum, p2: MyStruct, p3: Vec<u32>, p4: dep::DepStruct<i32>) {
     println!("This is a different function.");
 }
 
-fn bar(p1: [[u32; 3]; 3]) {}
+fn baz(p1: [[u32; 3]; 3]) {}

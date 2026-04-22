@@ -27,12 +27,15 @@ impl rustc_driver::Callbacks for ConstructDecls {
         compiler: &rustc_interface::interface::Compiler,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
     ) -> rustc_driver::Compilation {
+        // find globals first? so that we know to add var decls for them to all sites.
+
         let items = tcx.hir_crate_items(());
         for ldid in items.definitions() {
             let node = tcx.hir_node_by_def_id(ldid);
             match node {
                 rustc_hir::Node::Item(item) => {
                     match item.kind {
+                        // Add ENTER/EXIT sites for all free functions.
                         rustc_hir::ItemKind::Fn {
                             sig,
                             ident,
@@ -68,20 +71,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
 
 
 
-                        rustc_hir::ItemKind::Enum(ident, generics, enum_def) => {
-                            let file_name = get_containing_file_name(compiler, item.span);
-                            let ppt_name = format!("{}.{}", file_name, ident.as_str());
-                        }
-
-
-
-                        rustc_hir::ItemKind::Struct(ident, generics, variant_data) => {
-                            let file_name = get_containing_file_name(compiler, item.span);
-                            let ppt_name = format!("{}.{}", file_name, ident.as_str());
-                        }
-
-
-
+                        // Add ENTER/EXIT sites for all methods, including impls of traits
                         rustc_hir::ItemKind::Impl(rustc_hir::Impl { self_ty, items, .. }) => {
                             let file_name = get_containing_file_name(compiler, item.span);
                             let rustc_hir::TyKind::Path(rustc_hir::QPath::Resolved(_, path)) =
@@ -110,7 +100,9 @@ impl rustc_driver::Callbacks for ConstructDecls {
                         }
 
                         
+
                         // take notes of all default impls?
+                        // Add ENTER/EXIT sites for all default functions of traits
                         rustc_hir::ItemKind::Trait(..) => {}
 
                         _ => {} // ignore all the other item kinds
