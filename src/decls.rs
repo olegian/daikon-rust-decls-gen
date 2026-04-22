@@ -1,5 +1,3 @@
-use rustc_span::sym::Ok;
-
 use crate::callbacks;
 use std::io::Write;
 

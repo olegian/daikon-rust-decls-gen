@@ -55,20 +55,32 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                     .to_string()
                             });
 
+                            // consider finding all instantiations of this func, and then create separate
+                            // related sites for all concrete functions, then a site which represents the LUB
+                            // of all concrete sites to represent the generic site.
+                            // benefits of querying the MIR..
                             let sig = tcx.fn_sig(ldid).instantiate_identity().skip_binder();
                             let inputs = param_names.zip(sig.inputs());
                             enter_ppt.include_fn_inputs(&tcx, inputs);
 
                             self.decls.add_program_point(ppt_name, enter_ppt);
                         }
+
+
+
                         rustc_hir::ItemKind::Enum(ident, generics, enum_def) => {
                             let file_name = get_containing_file_name(compiler, item.span);
                             let ppt_name = format!("{}.{}", file_name, ident.as_str());
                         }
+
+
+
                         rustc_hir::ItemKind::Struct(ident, generics, variant_data) => {
                             let file_name = get_containing_file_name(compiler, item.span);
                             let ppt_name = format!("{}.{}", file_name, ident.as_str());
                         }
+
+
 
                         rustc_hir::ItemKind::Impl(rustc_hir::Impl { self_ty, items, .. }) => {
                             let file_name = get_containing_file_name(compiler, item.span);
@@ -96,6 +108,10 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 }
                             }
                         }
+
+                        
+                        // take notes of all default impls?
+                        rustc_hir::ItemKind::Trait(..) => {}
 
                         _ => {} // ignore all the other item kinds
                     }
