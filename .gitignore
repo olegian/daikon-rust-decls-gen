@@ -1,2 +1,7 @@
 /target
+/mir_dump
 tests/*/*.decls
+
+main
+tmp
+
