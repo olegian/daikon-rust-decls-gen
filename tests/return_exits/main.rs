@@ -17,7 +17,11 @@ fn void_explicit_multiple(x: u32) {
         return;
     }
 
-    if x == 0 { return } else { return };
+    if x == 0 {
+        return;
+    } else {
+        return;
+    };
 }
 
 fn void_implicit_multiple(x: u32) {
@@ -26,9 +30,9 @@ fn void_implicit_multiple(x: u32) {
         return;
     }
 
-    if x == 0 { 
-        return; 
-    } 
+    if x == 0 {
+        return;
+    }
 
     // there is also technically a return statement here
 }
@@ -49,7 +53,11 @@ fn value_explicit_multiple(x: u32) -> u32 {
         return x;
     }
 
-    if x == 0 { return x } else { return x };
+    if x == 0 {
+        return x;
+    } else {
+        return x;
+    };
 }
 
 fn value_implicit_multiple(x: u32) -> u32 {
@@ -58,9 +66,9 @@ fn value_implicit_multiple(x: u32) -> u32 {
         return x;
     }
 
-    if x == 0 { 
-        return x; 
-    } 
+    if x == 0 {
+        return x;
+    }
 
     x
 }

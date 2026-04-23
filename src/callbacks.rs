@@ -1,4 +1,4 @@
-use crate::decls;
+use crate::{decls, fields::ParentRelationType, ppt::ProgramPoint};
 
 #[derive(Default)]
 pub struct ConstructDecls {
@@ -98,7 +98,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 let method_ldid = assoc_item.owner_id.def_id;
                                 let owner = tcx.hir_expect_impl_item(method_ldid);
 
-                                // for now, we only care about assoc functions. we probably 
+                                // for now, we only care about assoc functions. we probably
                                 // should also do something with constants though
                                 let rustc_hir::ImplItemKind::Fn(_sig, body_id) = owner.kind else {
                                     continue;
@@ -169,7 +169,7 @@ impl ConstructDecls {
         param_names: &[String],
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
     ) -> String {
-        let (enter_name, mut enter_ppt) = decls::ProgramPoint::enter(&base_ppt_name);
+        let (enter_name, mut enter_ppt) = ProgramPoint::enter(&base_ppt_name);
         enter_ppt.include_fn_inputs(&tcx, param_names.iter().cloned().zip(input_tys.iter()));
         self.decls.add_program_point(enter_name.clone(), enter_ppt);
         enter_name
@@ -236,8 +236,7 @@ impl ConstructDecls {
             }
             assigned.insert(candidate);
 
-            let (subexit_name, mut subexit_ppt) =
-                decls::ProgramPoint::subexit(base_ppt_name, candidate);
+            let (subexit_name, mut subexit_ppt) = ProgramPoint::subexit(base_ppt_name, candidate);
             subexit_ppt.include_fn_inputs(&tcx, param_names.iter().cloned().zip(input_tys.iter()));
             subexit_ppt.include_fn_return(&tcx, return_ty);
             self.decls
@@ -246,14 +245,14 @@ impl ConstructDecls {
         }
 
         // Now that subexits exist, create exit point.
-        let (exit_name, mut exit_ppt) = decls::ProgramPoint::exit(base_ppt_name);
+        let (exit_name, mut exit_ppt) = ProgramPoint::exit(base_ppt_name);
         exit_ppt.include_fn_inputs(&tcx, param_names.iter().cloned().zip(input_tys.iter()));
         exit_ppt.include_fn_return(&tcx, return_ty);
 
         for subexit in subexits.into_iter() {
             exit_ppt.add_parent(
                 subexit,
-                decls::ParentRelationType::ExitExitNN,
+                ParentRelationType::ExitExitNN,
                 self.next_parent_relation_id,
             );
             self.next_parent_relation_id += 1;
@@ -268,7 +267,7 @@ impl ConstructDecls {
             )
             .add_parent(
                 exit_name,
-                decls::ParentRelationType::EnterExit,
+                ParentRelationType::EnterExit,
                 self.next_parent_relation_id,
             );
         self.next_parent_relation_id += 1;

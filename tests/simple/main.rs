@@ -9,11 +9,8 @@ impl MyStruct {
 
 enum MyEnum {
     V1(u32, f64),
-    V2 {
-        a: u64,
-        b: bool
-    },
-    V3
+    V2 { a: u64, b: bool },
+    V3,
 }
 
 fn main() {
