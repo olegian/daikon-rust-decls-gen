@@ -127,6 +127,7 @@ impl DeclsFile {
                     .ok_or(DeclsFileParseError::MalformedPpt)?
                     .parse()
                     .map_err(|_| DeclsFileParseError::MalformedPpt)?;
+                // probably deserves to be done via into(), with a From impl
                 let rel_type = match rel_str {
                     "parent" => ParentRelationType::Parent,
                     "enter-exit" => ParentRelationType::EnterExit,
@@ -163,6 +164,7 @@ impl DeclsFile {
                     lines.next();
 
                     if let Some(rest) = trimmed.strip_prefix("var-kind ") {
+                        // probably deserves to be done via into(), with a From impl
                         var_kind = Some(match rest {
                             "variable" => VarKind::Variable,
                             "array" => VarKind::Array,
