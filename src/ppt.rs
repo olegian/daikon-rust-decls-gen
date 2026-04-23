@@ -44,6 +44,14 @@ impl ProgramPoint {
         )
     }
 
+    pub fn get_var(&self, qualified_var_path: &str) -> Option<&VariableDecl> {
+        self.variables.get(qualified_var_path)
+    }
+
+    pub fn get_var_mut(&mut self, qualified_var_path: &str) -> Option<&mut VariableDecl> {
+        self.variables.get_mut(qualified_var_path)
+    }
+
     /// Register the program point with name `parent_ppt` as a parent of
     /// this program point, with the given relation type and id.
     pub fn add_parent(

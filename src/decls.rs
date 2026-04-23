@@ -254,4 +254,12 @@ impl DeclsFile {
     pub fn get_program_point(&self, name: &str) -> Option<&ProgramPoint> {
         self.ppts.get(name)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item=(&std::string::String, &ProgramPoint)>{
+        self.ppts.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item=(&std::string::String, &mut ProgramPoint)>{
+        self.ppts.iter_mut()
+    }
 }

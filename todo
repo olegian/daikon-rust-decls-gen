@@ -1,6 +1,8 @@
 1. need a reasonable way to iterate through all ppts / var-decls in each ppt
+    partially done with simple iter/iter_mut, and get*/get*mut
 2. would be nice to provide a helper function to quickly translate a span (?) into a ppt.
       maybe not a span, but something that is easily available to us in DATIR/c-rosae
+      on a similar wavelength, a helper funciton to quickly get a qualified_var_path
 3. traits. default impls
 4. test suite / test infra
 5. "external" adt special casing, also recursion depth
