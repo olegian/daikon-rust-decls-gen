@@ -207,6 +207,7 @@ impl ProgramPoint {
             // Compound types
             rustc_type_ir::TyKind::Adt(adt_def, generics) => {
                 if !adt_def.did().is_local() {
+                    // FIXME:
                     // Foreign ADTs (e.g. `Vec`, `Box`) need
                     // per-type special-casing. for now, just leave it
                     // as a hashcode, and stop recursing
