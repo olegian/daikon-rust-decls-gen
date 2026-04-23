@@ -8,3 +8,4 @@
 5. "external" adt special casing, also recursion depth
      at least vec, box (+smart ptrs), hashmap probably, ranges probably?
 6. ListImplementors? what is it? should we specify collections as list impls?
+7. README / whatever docs are useful.
