@@ -89,9 +89,14 @@ impl ProgramPoint {
     }
 
     /// Add all function inputs (formals) to this program point.
+    /// 
+    /// `inputs` is an iterator that nets items (var_name: String, var_type: mir::Ty).
     pub fn include_fn_inputs<'a, 'b>(
         &mut self,
         tcx: &'a rustc_middle::ty::TyCtxt<'b>,
+        // i really think there is a better way to represent this, but 
+        // because we are pulling names off the HIR body and types off the MIR,
+        // i'm not sure if there is a unified existing representation for it.
         inputs: impl Iterator<Item = (String, &'a rustc_middle::ty::Ty<'b>)>,
     ) {
         for (name, ty) in inputs {

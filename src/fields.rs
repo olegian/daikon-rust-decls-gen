@@ -67,7 +67,7 @@ pub enum DecType {
     Char,
     Str,
     /// Any aggregate type (struct / enum / tuple / array / slice / reference).
-    /// the stored string is the user-facing declared-type rendering.
+    /// the stored string is the rust, user-facing, dec-type
     Compound(String),
 }
 
@@ -88,8 +88,8 @@ impl DecType {
             | DecType::Isize => "int",
             DecType::F16 | DecType::F32 | DecType::F64 | DecType::F128 => "double",
             DecType::Bool => "boolean",
-            // char is utf-8 in Rust and doesn't fit cleanly into `int`; treat
-            // both it and `str` as Java strings at the rep-type level.
+            // char is utf-8 in Rust and doesn't fit cleanly into `int`.
+            // treat both it and `str` as Java strings
             DecType::Char | DecType::Str => "java.lang.String",
             DecType::Compound(_) => "hashcode",
         }
