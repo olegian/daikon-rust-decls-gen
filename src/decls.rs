@@ -226,7 +226,7 @@ impl DeclsFile {
     /// discovering all information required to write a decls file.
     pub fn from_source_file(crate_root_file: &std::path::Path) -> Self {
         let args = vec![
-            "decls-gen".to_string(),
+            "decls-gen".to_string(),  // dummy value.
             crate_root_file.to_str().unwrap().to_string(),
         ];
         let mut cbs = callbacks::ConstructDecls::default();
