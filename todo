@@ -1,0 +1,8 @@
+1. need a reasonable way to iterate through all ppts / var-decls in each ppt
+2. would be nice to provide a helper function to quickly translate a span (?) into a ppt.
+      maybe not a span, but something that is easily available to us in DATIR/c-rosae
+3. traits. default impls
+4. test suite / test infra
+5. "external" adt special casing, also recursion depth
+     at least vec, box (+smart ptrs), hashmap probably, ranges probably?
+6. ListImplementors? what is it? should we specify collections as list impls?

@@ -198,8 +198,11 @@ impl ConstructDecls {
             for stmt in &bb.statements {
                 // ... places where we directly assign a value to the return place,
                 // essentially %rax. These assignments happen right before all returns,
-                // including for void functions (at least in the initially built mir), based on
-                // manual inspection using the `rustc -Z dump-mir` command)
+                // including for void functions (at least in the initially built mir, 
+                // before ANY OTHER OPTIMIZATIONS OCCUR -- that's why it's important 
+                // that we are using the mir_built query as opposed to any other one).
+                // based on manual inspection using the `rustc -Z dump-mir` command),
+                // so hopefully this doesn't change in the future?
                 if let rustc_middle::mir::StatementKind::Assign(ref place_rvalue) = stmt.kind {
                     if place_rvalue.0.local == rustc_middle::mir::RETURN_PLACE {
                         spans.push(stmt.source_info.span);

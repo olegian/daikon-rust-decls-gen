@@ -250,4 +250,8 @@ impl DeclsFile {
     pub fn get_program_point_mut(&mut self, name: &str) -> Option<&mut ProgramPoint> {
         self.ppts.get_mut(name)
     }
+
+    pub fn get_program_point(&self, name: &str) -> Option<&ProgramPoint> {
+        self.ppts.get(name)
+    }
 }
