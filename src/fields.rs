@@ -65,7 +65,8 @@ pub enum DecType {
     F128,
     Bool,
     Char,
-    Str,
+    Str,    // &str type
+    String, // std::string::String type
     /// Any aggregate type (struct / enum / tuple / array / slice / reference).
     /// the stored string is the rust, user-facing, dec-type
     Compound(String),
@@ -90,15 +91,11 @@ impl DecType {
             DecType::Bool => "boolean",
             // char is utf-8 in Rust and doesn't fit cleanly into `int`.
             // treat both it and `str` as Java strings
-            DecType::Char | DecType::Str => "java.lang.String",
+            DecType::Char | DecType::Str | DecType::String => "java.lang.String",
             DecType::Compound(_) => "hashcode",
         };
 
-        let suffix = if array > 0 {
-            "[]"
-        } else {
-            ""
-        };
+        let suffix = if array > 0 { "[]" } else { "" };
 
         format!("{}{}", base, suffix)
     }
@@ -126,6 +123,7 @@ impl std::fmt::Display for DecType {
             DecType::Bool => "bool",
             DecType::Char => "char",
             DecType::Str => "str",
+            DecType::String => "std::string::String",
             DecType::Compound(s) => return f.write_str(s),
         };
         f.write_str(s)
@@ -133,7 +131,10 @@ impl std::fmt::Display for DecType {
 }
 
 impl DecType {
-    pub fn from_ty<'b>(ty: rustc_middle::ty::Ty<'b>) -> Self {
+    pub fn from_ty<'tcx>(
+        tcx: &rustc_middle::ty::TyCtxt<'tcx>,
+        ty: rustc_middle::ty::Ty<'tcx>,
+    ) -> Self {
         match ty.kind() {
             rustc_type_ir::TyKind::Bool => DecType::Bool,
             rustc_type_ir::TyKind::Char => DecType::Char,
@@ -163,6 +164,20 @@ impl DecType {
                 rustc_ast::FloatTy::F64 => DecType::F64,
                 rustc_ast::FloatTy::F128 => DecType::F128,
             },
+
+            rustc_type_ir::TyKind::Adt(adt_def, _) => {
+                // String has to be recognized as a DecType::String.
+                if adt_def.did()
+                    == tcx
+                        .lang_items()
+                        .string()
+                        .expect("Unable to find def id of std::string::String type")
+                {
+                    DecType::String
+                } else {
+                    DecType::Compound(ty.to_string())
+                }
+            }
 
             // Everything else is an aggregate and prints with hashcode rep-type.
             _ => DecType::Compound(ty.to_string()),

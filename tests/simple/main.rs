@@ -19,7 +19,7 @@ fn main() {
     println!("Hello, world!");
 }
 
-fn foo(p1: MyEnum, p2: MyStruct<&str>, p3: Vec<u32>, p4: dep::DepStruct<i32>) {
+fn foo(p1: MyEnum, p2: MyStruct<&str>, p3: Vec<String>, p4: dep::DepStruct<i32>) {
     p2.bar("hello");
     println!("This is a different function.");
 }

@@ -151,7 +151,7 @@ impl ProgramPoint {
             name.clone(),
             VariableDecl::new(
                 var_kind,
-                DecType::from_ty(ty),
+                DecType::from_ty(tcx, ty),
                 parent,
                 if in_array { 1 } else { 0 },
                 None,
@@ -261,8 +261,6 @@ impl ProgramPoint {
                         name,
                         adt_did,
                         &generics[..],
-                        // parent,
-                        // var_kind,
                         remaining_recursive_depth,
                         in_array,
                     );
@@ -331,8 +329,6 @@ impl ProgramPoint {
         name: String,
         adt_did: rustc_span::def_id::DefId,
         adt_generics: &[rustc_middle::ty::GenericArg<'tcx>],
-        // parent: Option<String>,
-        // var_kind: VarKind,
         remaining_recursive_depth: Option<usize>,
         in_array: bool,
     ) {
