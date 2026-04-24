@@ -19,9 +19,11 @@
 
 QUESTIONS:
   what should happen with 2d arrays right now, should i  really just panic?
+   --> don't expand sequences of sequences at all
 
   what types should be special cased
     - what is list implementors, and should Vec/arrays/slices be included
+    -> box, vec, ranges
 
   is my interpretation of dataflow heirarchy / parent tags correct
   --> reverse this right now, exitnn's parent is exit,

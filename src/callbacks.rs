@@ -90,7 +90,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 tcx,
                                 ldid,
                                 &base_ppt_name,
-                                &enter_name,
+                                enter_name,
                                 &param_names,
                                 &input_tys,
                                 return_ty,
@@ -157,7 +157,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                     tcx,
                                     method_ldid,
                                     &base_ppt_name,
-                                    &enter_name,
+                                    enter_name,
                                     &param_names,
                                     &input_tys,
                                     return_ty,
@@ -206,11 +206,25 @@ impl ConstructDecls {
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         ldid: rustc_span::def_id::LocalDefId,
         base_ppt_name: &str,
-        enter_name: &str,
+        enter_name: String,
         param_names: &[String],
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
         return_ty: rustc_middle::ty::Ty<'tcx>,
     ) {
+        // Add abstract EXIT point before handling any EXITNN's
+        let (exit_name, mut exit_ppt) = ProgramPoint::exit(base_ppt_name);
+        exit_ppt.include_fn_inputs(
+            &tcx,
+            param_names.iter().cloned().zip(input_tys.iter()),
+            self.max_recursive_depth,
+        );
+        exit_ppt.include_fn_return(&tcx, return_ty, self.max_recursive_depth);
+        // exit has parent tag refering to enter
+        exit_ppt.add_parent(enter_name, ParentRelationType::EnterExit, self.next_parent_relation_id);
+        self.next_parent_relation_id += 1;
+        self.decls.add_program_point(exit_name.clone(), exit_ppt);
+
+        // Add EXITNN's:
         // get mir representation of the function of interest
         let mir = tcx.mir_built(ldid).borrow();
         let source_map = compiler.sess.source_map();
@@ -260,7 +274,6 @@ impl ConstructDecls {
         // this probably makes the output slightly harder to understand, but should meet spec
         // requirements, keeping subexits with distinct ids.
         let mut assigned = std::collections::HashSet::new();
-        let mut subexits = std::collections::HashSet::new();
         for line in lines {
             let mut candidate = line;
             while assigned.contains(&candidate) {
@@ -275,42 +288,12 @@ impl ConstructDecls {
                 self.max_recursive_depth,
             );
             subexit_ppt.include_fn_return(&tcx, return_ty, self.max_recursive_depth);
+            // subexits get parent tag pointing to abstract exit.
+            subexit_ppt.add_parent(exit_name.clone(), ParentRelationType::ExitExitNN, self.next_parent_relation_id);
+            self.next_parent_relation_id += 1;
             self.decls
                 .add_program_point(subexit_name.clone(), subexit_ppt);
-            subexits.insert(subexit_name);
         }
-
-        // Now that subexits exist, create exit point.
-        let (exit_name, mut exit_ppt) = ProgramPoint::exit(base_ppt_name);
-        exit_ppt.include_fn_inputs(
-            &tcx,
-            param_names.iter().cloned().zip(input_tys.iter()),
-            self.max_recursive_depth,
-        );
-        exit_ppt.include_fn_return(&tcx, return_ty, self.max_recursive_depth);
-
-        for subexit in subexits.into_iter() {
-            exit_ppt.add_parent(
-                subexit,
-                ParentRelationType::ExitExitNN,
-                self.next_parent_relation_id,
-            );
-            self.next_parent_relation_id += 1;
-        }
-        self.decls.add_program_point(exit_name.clone(), exit_ppt);
-
-        // edit enter point to include exit point parent field
-        self.decls
-            .get_program_point_mut(&enter_name)
-            .expect(
-                "Attempting to create exit point without first making corresponding enter point.",
-            )
-            .add_parent(
-                exit_name,
-                ParentRelationType::EnterExit,
-                self.next_parent_relation_id,
-            );
-        self.next_parent_relation_id += 1;
     }
 }
 
