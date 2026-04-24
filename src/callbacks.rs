@@ -54,6 +54,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
         let items = tcx.hir_crate_items(());
         for ldid in items.definitions() {
             let node = tcx.hir_node_by_def_id(ldid);
+            println!("NODE: {:?}\n", node);
             match node {
                 rustc_hir::Node::Item(item) => {
                     match item.kind {

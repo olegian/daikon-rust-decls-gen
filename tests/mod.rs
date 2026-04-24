@@ -43,3 +43,13 @@ fn rec_depth() {
     let out_file = cwd.join("tests/rec_depth/rec_depth.decls");
     decls.write_to_file(&out_file).unwrap();
 }
+
+#[test]
+fn globals() {
+    let cwd = std::env::current_dir().unwrap();
+    let test_file = cwd.join("tests/globals/main.rs");
+    let decls = decls_gen::DeclsFile::from_source_file(&test_file, Some(3));
+
+    let out_file = cwd.join("tests/globals/globals.decls");
+    decls.write_to_file(&out_file).unwrap();
+}
