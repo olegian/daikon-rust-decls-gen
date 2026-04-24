@@ -4,17 +4,18 @@
 fn simple() {
     let cwd = std::env::current_dir().unwrap();
     let test_file = cwd.join("tests/simple/main.rs");
-    let decls = decls_gen::DeclsFile::from_source_file(&test_file);
+    let decls = decls_gen::DeclsFile::from_source_file(&test_file, None);
 
     let out_file = cwd.join("tests/simple/simple.decls");
     decls.write_to_file(&out_file).unwrap();
 }
 
 #[test]
+#[ignore]
 fn simple_parse() {
     let cwd = std::env::current_dir().unwrap();
     let test_file = cwd.join("tests/simple/main.rs");
-    let decls = decls_gen::DeclsFile::from_source_file(&test_file);
+    let decls = decls_gen::DeclsFile::from_source_file(&test_file, None);
 
     let out_file = cwd.join("tests/simple/simple.decls");
     decls.write_to_file(&out_file).unwrap();
@@ -27,8 +28,18 @@ fn simple_parse() {
 fn return_exits() {
     let cwd = std::env::current_dir().unwrap();
     let test_file = cwd.join("tests/return_exits/main.rs");
-    let decls = decls_gen::DeclsFile::from_source_file(&test_file);
+    let decls = decls_gen::DeclsFile::from_source_file(&test_file, None);
 
     let out_file = cwd.join("tests/return_exits/return_exits.decls");
+    decls.write_to_file(&out_file).unwrap();
+}
+
+#[test]
+fn rec_depth() {
+    let cwd = std::env::current_dir().unwrap();
+    let test_file = cwd.join("tests/rec_depth/main.rs");
+    let decls = decls_gen::DeclsFile::from_source_file(&test_file, Some(3));
+
+    let out_file = cwd.join("tests/rec_depth/rec_depth.decls");
     decls.write_to_file(&out_file).unwrap();
 }

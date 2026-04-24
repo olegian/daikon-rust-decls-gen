@@ -11,3 +11,27 @@
 7. README / whatever docs are useful.
 8. IMPORTANT: escaping all relevant chars:
     In the declaration file, blanks must be replaced by \_, and backslashes must be escaped as \\
+9. generic types currently show up as just hashcodes, is this correct?
+    can technically look for instantiations and check against them.
+10. arrays of hashcode rep-type for arrays of compound types
+      double check all array of type rep-types, this question is related to array dimension too
+
+
+QUESTIONS:
+  what should happen with 2d arrays right now, should i  really just panic?
+
+  what types should be special cased
+    - what is list implementors, and should Vec/arrays/slices be included
+
+  is my interpretation of dataflow heirarchy / parent tags correct
+  --> reverse this right now, exitnn's parent is exit,
+      exits parent is enter
+
+  globals, rust has static (fixed mem location, unsafe-mutable that often requires things like lazy-lock) and const (inlined, immutable values). Should all ppts include a var-decl for all statics and consts?
+   - include const tag on consts, statics are just normal variables really
+
+  enviornment variables as input to main?
+   - ignore args to main
+
+  there is a way to find out information about generic instantiations of at the very least, functions.
+  - 

@@ -226,12 +226,17 @@ impl DeclsFile {
 
     /// Compiles the crate identified by the `crate_root_file`,
     /// discovering all information required to write a decls file.
-    pub fn from_source_file(crate_root_file: &std::path::Path) -> Self {
+    /// `max_recursive_depth` specifies the maximum depth with which to expand variables
+    /// of compound types. If None, then variables are expanded till a leaf type is found. 
+    /// If Some(0), output will only include program point information tags, with no variable
+    /// declarations under any program point.
+    pub fn from_source_file(crate_root_file: &std::path::Path, max_recursive_depth: Option<usize>) -> Self {
         let args = vec![
-            "decls-gen".to_string(),  // dummy value.
+            "decls-gen".to_string(), // dummy value.
             crate_root_file.to_str().unwrap().to_string(),
         ];
-        let mut cbs = callbacks::ConstructDecls::default();
+        let mut cbs =
+            callbacks::ConstructDecls::default().with_max_recursive_depth(max_recursive_depth);
         rustc_driver::run_compiler(&args, &mut cbs);
 
         cbs.into_decls_file()
@@ -257,11 +262,11 @@ impl DeclsFile {
         self.ppts.get(name)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=(&std::string::String, &ProgramPoint)>{
+    pub fn iter(&self) -> impl Iterator<Item = (&std::string::String, &ProgramPoint)> {
         self.ppts.iter()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item=(&std::string::String, &mut ProgramPoint)>{
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&std::string::String, &mut ProgramPoint)> {
         self.ppts.iter_mut()
     }
 }

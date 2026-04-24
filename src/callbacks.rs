@@ -8,9 +8,19 @@ pub struct ConstructDecls {
     // or if per program point, but i think it's safe to assume its over the
     // entire file.
     next_parent_relation_id: u64,
+
+    // governs how deeply compound types are expanded into variable decls.
+    // if zero, then goes the maximal depth, expanding compound types until
+    // leaf types are found.
+    max_recursive_depth: Option<usize>,
 }
 
 impl ConstructDecls {
+    pub fn with_max_recursive_depth(mut self, max_recursive_depth: Option<usize>) -> Self {
+        self.max_recursive_depth = max_recursive_depth;
+        self
+    }
+
     pub fn into_decls_file(self) -> decls::DeclsFile {
         self.decls
     }
@@ -32,6 +42,15 @@ impl rustc_driver::Callbacks for ConstructDecls {
         compiler: &rustc_interface::interface::Compiler,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
     ) -> rustc_driver::Compilation {
+        // Finding all instantiations of generic funcs
+        // this might also find generic structs?
+        // let res = tcx.collect_and_partition_mono_items(());
+        // println!("{:#?}", res);
+        // return rustc_driver::Compilation::Stop;
+
+        // find crate that contains generic template?
+        // Instance::upstream_monomorphization(&self, tcx)
+
         let items = tcx.hir_crate_items(());
         for ldid in items.definitions() {
             let node = tcx.hir_node_by_def_id(ldid);
@@ -170,7 +189,11 @@ impl ConstructDecls {
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
     ) -> String {
         let (enter_name, mut enter_ppt) = ProgramPoint::enter(&base_ppt_name);
-        enter_ppt.include_fn_inputs(&tcx, param_names.iter().cloned().zip(input_tys.iter()));
+        enter_ppt.include_fn_inputs(
+            &tcx,
+            param_names.iter().cloned().zip(input_tys.iter()),
+            self.max_recursive_depth,
+        );
         self.decls.add_program_point(enter_name.clone(), enter_ppt);
         enter_name
     }
@@ -198,8 +221,8 @@ impl ConstructDecls {
             for stmt in &bb.statements {
                 // ... places where we directly assign a value to the return place,
                 // essentially %rax. These assignments happen right before all returns,
-                // including for void functions (at least in the initially built mir, 
-                // before ANY OTHER OPTIMIZATIONS OCCUR -- that's why it's important 
+                // including for void functions (at least in the initially built mir,
+                // before ANY OTHER OPTIMIZATIONS OCCUR -- that's why it's important
                 // that we are using the mir_built query as opposed to any other one).
                 // based on manual inspection using the `rustc -Z dump-mir` command),
                 // so hopefully this doesn't change in the future?
@@ -211,6 +234,8 @@ impl ConstructDecls {
             }
 
             // ... invocations of functions that write to the return place.
+            // note that TerminatorKind::Return is unnecessary for us, that would've been
+            // caught by the assignment that came before it.
             if let rustc_middle::mir::TerminatorKind::Call { destination, .. } =
                 &bb.terminator().kind
             {
@@ -218,6 +243,10 @@ impl ConstructDecls {
                     spans.push(bb.terminator().source_info.span);
                 }
             }
+
+            // ... might also have to do something with TailCall? looks like the result of a TailCall
+            // is always written to _0, which means it's a return point? write out
+            // a tail-call test and dump out it's MIR to find out whats going on.
         }
 
         // Resolve each span to a source line via the source map
@@ -240,8 +269,12 @@ impl ConstructDecls {
             assigned.insert(candidate);
 
             let (subexit_name, mut subexit_ppt) = ProgramPoint::subexit(base_ppt_name, candidate);
-            subexit_ppt.include_fn_inputs(&tcx, param_names.iter().cloned().zip(input_tys.iter()));
-            subexit_ppt.include_fn_return(&tcx, return_ty);
+            subexit_ppt.include_fn_inputs(
+                &tcx,
+                param_names.iter().cloned().zip(input_tys.iter()),
+                self.max_recursive_depth,
+            );
+            subexit_ppt.include_fn_return(&tcx, return_ty, self.max_recursive_depth);
             self.decls
                 .add_program_point(subexit_name.clone(), subexit_ppt);
             subexits.insert(subexit_name);
@@ -249,8 +282,12 @@ impl ConstructDecls {
 
         // Now that subexits exist, create exit point.
         let (exit_name, mut exit_ppt) = ProgramPoint::exit(base_ppt_name);
-        exit_ppt.include_fn_inputs(&tcx, param_names.iter().cloned().zip(input_tys.iter()));
-        exit_ppt.include_fn_return(&tcx, return_ty);
+        exit_ppt.include_fn_inputs(
+            &tcx,
+            param_names.iter().cloned().zip(input_tys.iter()),
+            self.max_recursive_depth,
+        );
+        exit_ppt.include_fn_return(&tcx, return_ty, self.max_recursive_depth);
 
         for subexit in subexits.into_iter() {
             exit_ppt.add_parent(

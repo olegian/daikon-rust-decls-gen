@@ -72,8 +72,8 @@ pub enum DecType {
 }
 
 impl DecType {
-    fn to_rep_type(&self) -> &'static str {
-        match self {
+    fn to_rep_type(&self, array: u8) -> String {
+        let base = match self {
             DecType::U8
             | DecType::U16
             | DecType::U32
@@ -92,7 +92,15 @@ impl DecType {
             // treat both it and `str` as Java strings
             DecType::Char | DecType::Str => "java.lang.String",
             DecType::Compound(_) => "hashcode",
-        }
+        };
+
+        let suffix = if array > 0 {
+            "[]"
+        } else {
+            ""
+        };
+
+        format!("{}{}", base, suffix)
     }
 }
 
@@ -224,7 +232,7 @@ impl std::fmt::Display for VariableDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "  var-kind {}", self.var_kind)?;
         writeln!(f, "  dec-type {}", self.dec_type)?;
-        writeln!(f, "  rep-type {}", self.dec_type.to_rep_type())?;
+        writeln!(f, "  rep-type {}", self.dec_type.to_rep_type(self.array))?;
         if let Some(enc) = &self.enclosing_var {
             writeln!(f, "  enclosing-var {}", enc)?;
         }

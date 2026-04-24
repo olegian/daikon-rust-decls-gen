@@ -74,6 +74,7 @@ impl ProgramPoint {
         &mut self,
         tcx: &rustc_middle::ty::TyCtxt<'b>,
         ret_ty: rustc_middle::ty::Ty<'b>,
+        max_recursive_depth: Option<usize>,
     ) {
         if ret_ty.is_unit() {
             return;
@@ -84,23 +85,33 @@ impl ProgramPoint {
             ret_ty,
             None,
             VarKind::Return,
+            max_recursive_depth,
             false,
         );
     }
 
     /// Add all function inputs (formals) to this program point.
-    /// 
+    ///
     /// `inputs` is an iterator that nets items (var_name: String, var_type: mir::Ty).
     pub fn include_fn_inputs<'a, 'b>(
         &mut self,
         tcx: &'a rustc_middle::ty::TyCtxt<'b>,
-        // i really think there is a better way to represent this, but 
+        // i really think there is a better way to represent this, but
         // because we are pulling names off the HIR body and types off the MIR,
         // i'm not sure if there is a unified existing representation for it.
         inputs: impl Iterator<Item = (String, &'a rustc_middle::ty::Ty<'b>)>,
+        max_recursive_depth: Option<usize>,
     ) {
         for (name, ty) in inputs {
-            self.add_var(tcx, name, *ty, None, VarKind::Variable, false);
+            self.add_var(
+                tcx,
+                name,
+                *ty,
+                None,
+                VarKind::Variable,
+                max_recursive_depth,
+                false,
+            );
         }
     }
 
@@ -110,7 +121,7 @@ impl ProgramPoint {
     /// `name` is the fully-qualified variable name (e.g. "arr[..].field").
     /// `parent` is the enclosing variable's fully-qualified name, or `None`.
     /// `var_kind` describes how this variable relates to its parent
-    /// `parent_in_array` is true when any direct ancestor in the chain is an array
+    /// `in_array` used to stop reporting sequences of sequences, sticky parameter.
     fn add_var<'b>(
         &mut self,
         tcx: &rustc_middle::ty::TyCtxt<'b>,
@@ -118,8 +129,15 @@ impl ProgramPoint {
         ty: rustc_middle::ty::Ty<'b>,
         parent: Option<String>,
         var_kind: VarKind,
-        parent_in_array: bool,
+        remaining_recursive_depth: Option<usize>,
+        in_array: bool,
     ) {
+        if let Some(remaining_depth) = remaining_recursive_depth
+            && remaining_depth == 0
+        {
+            return;
+        }
+
         // Peel all references to the current type
         let mut ty = ty;
         while let rustc_type_ir::TyKind::Ref(_, inner, _) = ty.kind() {
@@ -128,8 +146,7 @@ impl ProgramPoint {
 
         // Any variable inside (or equal to) an array sequence has multiple
         // values, so it gets the <array 1> tag set, alongside any contained value.
-        let in_array = parent_in_array || matches!(var_kind, VarKind::Array);
-
+        let in_array = in_array || matches!(var_kind, VarKind::Array);
         self.variables.insert(
             name.clone(),
             VariableDecl::new(
@@ -177,6 +194,21 @@ impl ProgramPoint {
             // Arrays and slices emit `.length` (a field of the array pointer)
             // and then recurse into the actual sequence.
             rustc_type_ir::TyKind::Array(inner, _) | rustc_type_ir::TyKind::Slice(inner) => {
+                if in_array {
+                    // if we are already in an array, do not recurse deeper.
+                    // consider p: [Struct] where Struct.x --> [u32; N]
+                    // p
+                    // p.length
+                    // p[..]   <- always has a flat repr
+                    // p[..].x  <-- could have a flat repr, as long as it's not an array itself
+                    // p[..].x[..]  <-- cannot have a flat repr.
+                    // for now, because flattening out the sequence of
+                    // sequences for daikon is impossible, we won't report the vars
+                    // in the second sequence. If higher dim-arrays are ever supported,
+                    // just remove this clause and everything should work fine.
+                    return;
+                }
+
                 let len_name = format!("{}.length", name);
                 self.variables.insert(
                     len_name,
@@ -190,7 +222,15 @@ impl ProgramPoint {
                 );
 
                 let elem_name = format!("{}[..]", name);
-                self.add_var(tcx, elem_name, *inner, Some(name), VarKind::Array, in_array);
+                self.add_var(
+                    tcx,
+                    elem_name,
+                    *inner,
+                    Some(name),
+                    VarKind::Array,
+                    remaining_recursive_depth.map(|remaining| remaining - 1),
+                    in_array,
+                );
             }
 
             // Tuples emit each a var decl for all fields
@@ -204,6 +244,7 @@ impl ProgramPoint {
                         inner,
                         Some(name.clone()),
                         VarKind::Field(rel),
+                        remaining_recursive_depth.map(|remaining| remaining - 1),
                         in_array,
                     );
                 }
@@ -211,11 +252,20 @@ impl ProgramPoint {
 
             // Compound types
             rustc_type_ir::TyKind::Adt(adt_def, generics) => {
-                if !adt_def.did().is_local() {
-                    // FIXME:
-                    // Foreign ADTs (e.g. `Vec`, `Box`) need
-                    // per-type special-casing. for now, just leave it
-                    // as a hashcode, and stop recursing
+                let adt_did = adt_def.did();
+                if !adt_did.is_local() {
+                    // Some external types are special-cased, namely:
+                    // Vec, Box, and Range*. Handle those, otherwise skip.
+                    self.maybe_foreign_special_case_ty(
+                        tcx,
+                        name,
+                        adt_did,
+                        &generics[..],
+                        // parent,
+                        // var_kind,
+                        remaining_recursive_depth,
+                        in_array,
+                    );
                     return;
                 }
 
@@ -235,6 +285,7 @@ impl ProgramPoint {
                                 field_ty,
                                 Some(name.clone()),
                                 VarKind::Field(field_name),
+                                remaining_recursive_depth.map(|remaining| remaining - 1),
                                 in_array,
                             );
                         }
@@ -260,6 +311,7 @@ impl ProgramPoint {
                                     field_ty,
                                     Some(name.clone()),
                                     VarKind::Field(rel),
+                                    remaining_recursive_depth.map(|remaining| remaining - 1),
                                     in_array,
                                 );
                             }
@@ -270,6 +322,156 @@ impl ProgramPoint {
                     }
                 }
             }
+        }
+    }
+
+    fn maybe_foreign_special_case_ty<'tcx>(
+        &mut self,
+        tcx: &rustc_middle::ty::TyCtxt<'tcx>,
+        name: String,
+        adt_did: rustc_span::def_id::DefId,
+        adt_generics: &[rustc_middle::ty::GenericArg<'tcx>],
+        // parent: Option<String>,
+        // var_kind: VarKind,
+        remaining_recursive_depth: Option<usize>,
+        in_array: bool,
+    ) {
+        let lang_items = tcx.lang_items();
+        if tcx.is_diagnostic_item(rustc_span::symbol::sym::Vec, adt_did) {
+            // Vec type, treat similar to array. if P: Vec<u32> include var decls for:
+            // p  <-- already included by add_var
+            // p.length  <-- varkind field
+            // p[..]  <-- varkind array
+
+            if in_array {
+                // see array handling in self.add_var
+                return;
+            }
+
+            let len_name = format!("{}.length", name);
+            self.variables.insert(
+                len_name,
+                VariableDecl::new(
+                    VarKind::Field("length".to_string()),
+                    DecType::Usize,
+                    Some(name.clone()),
+                    if in_array { 1 } else { 0 },
+                    None,
+                ),
+            );
+
+            let elem_ty = adt_generics[0]
+                .as_type()
+                .expect("Found Vec<_> with no specified element type");
+            let elem_name = format!("{}[..]", name);
+            self.add_var(
+                tcx,
+                elem_name,
+                elem_ty,
+                Some(name),
+                VarKind::Array,
+                remaining_recursive_depth.map(|remaining| remaining - 1),
+                in_array,
+            );
+
+        } else if adt_did
+            == lang_items
+                .owned_box()
+                .expect("Unable to find def id of std box.")
+        {
+            // Box type, if p: Box<T>, include var decls for
+            // p: hashcode. <-- record included by add_var
+            // *p: T (inline with the enclosing var, in other words
+            //        a.b.c.*p could be the full path)
+            // FIXME: should it instead be something like *(a.b.c.p)?
+
+            // Box guaranteed to have exactly one generic type, the pointee type
+            let pointee_ty = adt_generics[0]
+                .as_type()
+                .expect("Found Box<_> with no specified pointee type");
+            let pointee = format!("*{}", name);
+
+            // FIXME: I don't think the varkind here should be Variable. Not sure what else
+            // to do though, maybe keep it whatever it was previously?
+            self.add_var(
+                tcx,
+                pointee,
+                pointee_ty,
+                Some(name),
+                VarKind::Variable,
+                remaining_recursive_depth.map(|remain| remain - 1),
+                in_array,
+            );
+        } else if adt_did
+            == lang_items
+                .range_full_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range Full (..)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_from_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range From (a..)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_from_copy_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range From + Copy (a.. such that a: Copy)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_to_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range To (..b)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_to_inclusive_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range To Inclusive (..=b)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_to_inclusive_copy_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range To Inclusive (..=b such that b: Copy)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range (a..b)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_copy_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range Copy (a..b such that a, b: Copy)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_inclusive_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range Inclusive (a..=b)
+            eprintln!("Ranges not yet special-cased, skipping...")
+        } else if adt_did
+            == lang_items
+                .range_inclusive_copy_struct()
+                .expect("Unable to find def id of RangeFull")
+        {
+            // Range Inclusive + Copy (a..=b such that a, b: Copy)
+            eprintln!("Ranges not yet special-cased, skipping...")
         }
     }
 }

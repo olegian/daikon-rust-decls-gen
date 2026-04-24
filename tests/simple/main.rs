@@ -1,8 +1,8 @@
 mod dep;
 
-struct MyStruct(u32);
-impl MyStruct {
-    fn bar(self) {
+struct MyStruct<T>(u32, T);
+impl<T> MyStruct<T> {
+    fn bar(&self, param: T) {
         println!("This function is inside an impl");
     }
 }
@@ -14,18 +14,27 @@ enum MyEnum {
 }
 
 fn main() {
+    quux((10, false, 10));
+    quux((10, false, "string"));
     println!("Hello, world!");
 }
 
-fn foo(p1: MyEnum, p2: MyStruct, p3: Vec<u32>, p4: dep::DepStruct<i32>) {
+fn foo(p1: MyEnum, p2: MyStruct<&str>, p3: Vec<u32>, p4: dep::DepStruct<i32>) {
+    p2.bar("hello");
     println!("This is a different function.");
 }
 
-fn baz(p1: [[u32; 3]; 3]) -> MyStruct {
-    return MyStruct(0);
+fn baz(p1: [[u32; 3]; 3]) -> MyStruct<i32> {
+    let res = MyStruct(0, 10);
+    res.bar(20);
+    res
 }
 
-fn early(x: i32) -> i32 {
+fn quux<T>(p1: (u32, bool, T)) {
+    println!("function accepts tuple!");
+}
+
+fn early(x: i32, box_p: Box<u32>) -> i32 {
     if x < 0 {
         return 0;
     }
