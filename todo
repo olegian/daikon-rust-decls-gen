@@ -37,3 +37,7 @@ QUESTIONS:
 
   there is a way to find out information about generic instantiations of at the very least, functions.
   - 
+
+4/24
+CONST evaluation context. There exist functions that can be called from a constant, compile time context. should these be special cased at all?
+  - they can be called at runtime too --> implies they should also be included in decls files

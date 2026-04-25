@@ -1,4 +1,8 @@
-use crate::{decls, fields::ParentRelationType, ppt::ProgramPoint};
+use crate::{
+    decls,
+    fields::{Global, ParentRelationType},
+    ppt::ProgramPoint,
+};
 
 #[derive(Default)]
 pub struct ConstructDecls {
@@ -52,9 +56,26 @@ impl rustc_driver::Callbacks for ConstructDecls {
         // Instance::upstream_monomorphization(&self, tcx)
 
         let items = tcx.hir_crate_items(());
+        // find all const/static items vars first. These vars
+        // will be included at all program points.
+        let mut globals: Vec<Global> = Vec::new();
         for ldid in items.definitions() {
             let node = tcx.hir_node_by_def_id(ldid);
-            println!("NODE: {:?}\n", node);
+            match node {
+                rustc_hir::Node::Item(item) => match item.kind {
+                    rustc_hir::ItemKind::Static(_, ident, _, _)
+                    | rustc_hir::ItemKind::Const(ident, _, _, _) => {
+                        let file_name = get_containing_file_name(compiler, item.span);
+                        globals.push(Global::new(ldid, file_name, ident));
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+
+        for ldid in items.definitions() {
+            let node = tcx.hir_node_by_def_id(ldid);
             match node {
                 rustc_hir::Node::Item(item) => {
                     match item.kind {
@@ -84,8 +105,13 @@ impl rustc_driver::Callbacks for ConstructDecls {
                             let return_ty = sig.output();
 
                             // add enter, subexit, and exit ppts to the decls file
-                            let enter_name =
-                                self.add_enter_ppt(tcx, &base_ppt_name, &param_names, &input_tys);
+                            let enter_name = self.add_enter_ppt(
+                                tcx,
+                                &base_ppt_name,
+                                &param_names,
+                                &input_tys,
+                                &globals,
+                            );
                             self.add_exit_ppts(
                                 compiler,
                                 tcx,
@@ -95,6 +121,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 &param_names,
                                 &input_tys,
                                 return_ty,
+                                &globals,
                             );
                         }
 
@@ -152,6 +179,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                     &base_ppt_name,
                                     &param_names,
                                     &input_tys,
+                                    &globals,
                                 );
                                 self.add_exit_ppts(
                                     compiler,
@@ -162,6 +190,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                     &param_names,
                                     &input_tys,
                                     return_ty,
+                                    &globals,
                                 );
                             }
                         }
@@ -176,6 +205,20 @@ impl rustc_driver::Callbacks for ConstructDecls {
             };
         }
 
+        // Evaluate all constants here, after every program point (including
+        // subexits, which depend on `mir_built`) has been constructed. Then
+        // tag every matching top-level var-decl with its compile-time value.
+        for global in &globals {
+            let Some(value) = global.evaluate(tcx) else {
+                continue;
+            };
+            for (_, ppt) in self.decls.iter_mut() {
+                if let Some(var) = ppt.get_var_mut(&global.name) {
+                    var.set_constant(Some(value.clone()));
+                }
+            }
+        }
+
         rustc_driver::Compilation::Stop
     }
 }
@@ -188,13 +231,17 @@ impl ConstructDecls {
         base_ppt_name: &str,
         param_names: &[String],
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
+        globals: &[Global],
     ) -> String {
-        let (enter_name, mut enter_ppt) = ProgramPoint::enter(&base_ppt_name);
-        enter_ppt.include_fn_inputs(
-            &tcx,
-            param_names.iter().cloned().zip(input_tys.iter()),
-            self.max_recursive_depth,
-        );
+        let (enter_name, enter_ppt) = ProgramPoint::enter(&base_ppt_name);
+        let enter_ppt = enter_ppt
+            .with_fn_inputs(
+                &tcx,
+                param_names.iter().cloned().zip(input_tys.iter()),
+                self.max_recursive_depth,
+            )
+            .with_globals(&tcx, globals, self.max_recursive_depth);
+
         self.decls.add_program_point(enter_name.clone(), enter_ppt);
         enter_name
     }
@@ -211,18 +258,25 @@ impl ConstructDecls {
         param_names: &[String],
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
         return_ty: rustc_middle::ty::Ty<'tcx>,
+        globals: &[Global],
     ) {
         // Add abstract EXIT point before handling any EXITNN's
-        let (exit_name, mut exit_ppt) = ProgramPoint::exit(base_ppt_name);
-        exit_ppt.include_fn_inputs(
-            &tcx,
-            param_names.iter().cloned().zip(input_tys.iter()),
-            self.max_recursive_depth,
-        );
-        exit_ppt.include_fn_return(&tcx, return_ty, self.max_recursive_depth);
-        // exit has parent tag refering to enter
-        exit_ppt.add_parent(enter_name, ParentRelationType::EnterExit, self.next_parent_relation_id);
-        self.next_parent_relation_id += 1;
+        let (exit_name, exit_ppt) = ProgramPoint::exit(base_ppt_name);
+        let exit_ppt = exit_ppt
+            .with_fn_inputs(
+                &tcx,
+                param_names.iter().cloned().zip(input_tys.iter()),
+                self.max_recursive_depth,
+            )
+            .with_fn_return(&tcx, return_ty, self.max_recursive_depth)
+            .with_globals(&tcx, globals, self.max_recursive_depth)
+            .with_parent(
+                // exit has parent tag refering to enter
+                enter_name,
+                ParentRelationType::EnterExit,
+                &mut self.next_parent_relation_id,
+            );
+
         self.decls.add_program_point(exit_name.clone(), exit_ppt);
 
         // Add EXITNN's:
@@ -282,16 +336,22 @@ impl ConstructDecls {
             }
             assigned.insert(candidate);
 
-            let (subexit_name, mut subexit_ppt) = ProgramPoint::subexit(base_ppt_name, candidate);
-            subexit_ppt.include_fn_inputs(
-                &tcx,
-                param_names.iter().cloned().zip(input_tys.iter()),
-                self.max_recursive_depth,
-            );
-            subexit_ppt.include_fn_return(&tcx, return_ty, self.max_recursive_depth);
-            // subexits get parent tag pointing to abstract exit.
-            subexit_ppt.add_parent(exit_name.clone(), ParentRelationType::ExitExitNN, self.next_parent_relation_id);
-            self.next_parent_relation_id += 1;
+            let (subexit_name, subexit_ppt) = ProgramPoint::subexit(base_ppt_name, candidate);
+            let subexit_ppt = subexit_ppt
+                .with_fn_inputs(
+                    &tcx,
+                    param_names.iter().cloned().zip(input_tys.iter()),
+                    self.max_recursive_depth,
+                )
+                .with_fn_return(&tcx, return_ty, self.max_recursive_depth)
+                .with_globals(&tcx, globals, self.max_recursive_depth)
+                .with_parent(
+                    // subexits get parent tag pointing to abstract exit.
+                    exit_name.clone(),
+                    ParentRelationType::ExitExitNN,
+                    &mut self.next_parent_relation_id,
+                );
+
             self.decls
                 .add_program_point(subexit_name.clone(), subexit_ppt);
         }

@@ -12,7 +12,7 @@ pub struct DeclsFile {
     ppts: std::collections::HashMap<String, ProgramPoint>,
 }
 
-impl std::fmt::Display for DeclsFile {
+impl<'a> std::fmt::Display for DeclsFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "decl-version 2.0")?;
         writeln!(f, "input-language rust")?;
@@ -150,7 +150,7 @@ impl DeclsFile {
                 let mut var_kind: Option<VarKind> = None;
                 let mut dec_type: Option<DecType> = None;
                 let mut enclosing_var: Option<String> = None;
-                let mut array: u8 = 0;
+                let mut array: Option<u8> = None;
                 let mut comparability: Option<i64> = None;
 
                 while let Some(field_line) = lines.peek() {
@@ -186,9 +186,10 @@ impl DeclsFile {
                     } else if let Some(rest) = trimmed.strip_prefix("enclosing-var ") {
                         enclosing_var = Some(rest.to_string());
                     } else if let Some(rest) = trimmed.strip_prefix("array ") {
-                        array = rest
-                            .parse()
-                            .map_err(|_| DeclsFileParseError::MalformedPpt)?;
+                        array = Some(
+                            rest.parse::<u8>()
+                                .map_err(|_| DeclsFileParseError::MalformedPpt)?,
+                        );
                     } else if let Some(rest) = trimmed.strip_prefix("comparability ") {
                         let v: i64 = rest
                             .parse()
@@ -199,16 +200,15 @@ impl DeclsFile {
                     }
                 }
 
-                variables.insert(
-                    var_name,
-                    VariableDecl::new(
-                        var_kind.ok_or(DeclsFileParseError::MalformedPpt)?,
-                        dec_type.ok_or(DeclsFileParseError::MalformedPpt)?,
-                        enclosing_var,
-                        array,
-                        comparability,
-                    ),
-                );
+                let var_decl = VariableDecl::new(
+                    var_kind.expect("Found a variable decl with no var_kind specified."),
+                    dec_type.expect("Found a variable decl with no dec_type specified."),
+                )
+                .with_enclosing_var(enclosing_var)
+                .with_array(array)
+                .with_comparability(comparability);
+
+                variables.insert(var_name, var_decl);
             }
 
             decls.ppts.insert(
@@ -227,10 +227,13 @@ impl DeclsFile {
     /// Compiles the crate identified by the `crate_root_file`,
     /// discovering all information required to write a decls file.
     /// `max_recursive_depth` specifies the maximum depth with which to expand variables
-    /// of compound types. If None, then variables are expanded till a leaf type is found. 
+    /// of compound types. If None, then variables are expanded till a leaf type is found.
     /// If Some(0), output will only include program point information tags, with no variable
     /// declarations under any program point.
-    pub fn from_source_file(crate_root_file: &std::path::Path, max_recursive_depth: Option<usize>) -> Self {
+    pub fn from_source_file(
+        crate_root_file: &std::path::Path,
+        max_recursive_depth: Option<usize>,
+    ) -> Self {
         let args = vec![
             "decls-gen".to_string(), // dummy value.
             crate_root_file.to_str().unwrap().to_string(),

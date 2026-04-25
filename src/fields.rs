@@ -73,7 +73,7 @@ pub enum DecType {
 }
 
 impl DecType {
-    fn to_rep_type(&self, array: u8) -> String {
+    fn to_rep_type(&self, array: Option<u8>) -> String {
         let base = match self {
             DecType::U8
             | DecType::U16
@@ -95,7 +95,13 @@ impl DecType {
             DecType::Compound(_) => "hashcode",
         };
 
-        let suffix = if array > 0 { "[]" } else { "" };
+        let suffix = if let Some(array) = array
+            && array > 0
+        {
+            "[]"
+        } else {
+            ""
+        };
 
         format!("{}{}", base, suffix)
     }
@@ -221,25 +227,45 @@ pub struct VariableDecl {
     var_kind: VarKind,
     dec_type: DecType,
     enclosing_var: Option<String>,
-    array: u8,
+    array: Option<u8>,
+    constant: Option<String>,
     comparability: Option<i64>,
 }
 
 impl VariableDecl {
-    pub fn new(
-        var_kind: VarKind,
-        dec_type: DecType,
-        enclosing_var: Option<String>,
-        array: u8,
-        comparability: Option<i64>,
-    ) -> Self {
+    pub fn new(var_kind: VarKind, dec_type: DecType) -> Self {
         Self {
             var_kind,
             dec_type,
-            enclosing_var,
-            array,
-            comparability,
+            enclosing_var: None,
+            array: None,
+            comparability: None,
+            constant: None,
         }
+    }
+
+    pub fn with_array(mut self, dim: Option<u8>) -> Self {
+        self.array = dim;
+        self
+    }
+
+    pub fn with_enclosing_var(mut self, enclosing_var: Option<String>) -> Self {
+        self.enclosing_var = enclosing_var;
+        self
+    }
+
+    pub fn with_constant(mut self, value_repr: Option<String>) -> Self {
+        self.constant = value_repr;
+        self
+    }
+
+    pub fn set_constant(&mut self, value_repr: Option<String>) {
+        self.constant = value_repr;
+    }
+
+    pub fn with_comparability(mut self, comp: Option<i64>) -> Self {
+        self.comparability = comp;
+        self
     }
 }
 
@@ -251,8 +277,11 @@ impl std::fmt::Display for VariableDecl {
         if let Some(enc) = &self.enclosing_var {
             writeln!(f, "  enclosing-var {}", enc)?;
         }
-        if self.array > 0 {
-            writeln!(f, "  array {}", self.array)?;
+        if let Some(dim) = self.array {
+            writeln!(f, "  array {}", dim)?;
+        }
+        if let Some(constant) = &self.constant {
+            writeln!(f, "  constant {}", constant)?;
         }
         writeln!(f, "  comparability {}", self.comparability.unwrap_or(-1))?;
         Ok(())
@@ -273,5 +302,176 @@ impl std::fmt::Display for ParentRelationType {
             ParentRelationType::EnterExit => write!(f, "enter-exit"),
             ParentRelationType::ExitExitNN => write!(f, "exit-exitnn"),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Global {
+    pub name: String,
+    pub ldid: rustc_span::def_id::LocalDefId,
+}
+
+impl<'a> Global {
+    pub fn new(
+        ldid: rustc_span::def_id::LocalDefId,
+        file_name: String,
+        ident: rustc_span::Ident,
+    ) -> Global {
+        let name = format!("{}.{}", file_name, ident.as_str());
+        Self { name, ldid }
+    }
+
+    pub fn did(&self) -> rustc_hir::def_id::DefId {
+        self.ldid.to_def_id()
+    }
+
+    /// Compile-time-evaluate this global and return a string repr of its value,
+    /// or `None` if it isn't eligible for the `constant` tag (mutable static)
+    /// or its value can't be represented as a single scalar (e.g. aggregate
+    /// consts, slice consts, or any case the const-eval machinery can't
+    /// reduce here).
+    pub fn evaluate<'tcx>(&self, tcx: rustc_middle::ty::TyCtxt<'tcx>) -> Option<String> {
+        // `const` items and immutable `static` items have fixed values for the
+        // lifetime of the program; `static mut` items don't. The two cases also
+        // require different rustc query entry points: `const_eval_global_id`
+        // asserts the def-id is *not* a static, so statics must go through
+        // `eval_static_initializer` and have a scalar read out of the resulting
+        // allocation.
+        let did = self.ldid.to_def_id();
+        let is_const = match tcx.hir_node_by_def_id(self.ldid) {
+            rustc_hir::Node::Item(item) => match item.kind {
+                rustc_hir::ItemKind::Const(..) => true,
+                rustc_hir::ItemKind::Static(rustc_ast::Mutability::Not, ..) => false,
+                _ => return None,
+            },
+            _ => return None,
+        };
+
+        // Anything with hashcode rep-type (pointers, references, arrays-by-value,
+        // structs/enums) gets a placeholder for now — rustc's raw scalar repr
+        // (e.g. "pointer to alloc117<imm>") isn't a stable or meaningful value
+        // for Daikon, and we don't yet decompose aggregates per-leaf.
+        let ty = tcx
+            .type_of(self.ldid)
+            .instantiate_identity()
+            .skip_normalization();
+        if matches!(DecType::from_ty(&tcx, ty), DecType::Compound(_)) {
+            return Some("PTR_TYPE".to_string());
+        }
+
+        if is_const {
+            let ty_env = rustc_middle::ty::TypingEnv::fully_monomorphized();
+            let instance = rustc_middle::ty::Instance::mono(tcx, did);
+            let gid = rustc_middle::mir::interpret::GlobalId {
+                instance,
+                promoted: None,
+            };
+            match tcx.const_eval_global_id(ty_env, gid, rustc_span::DUMMY_SP) {
+                Ok(rustc_middle::mir::ConstValue::Scalar(scalar)) => Some(scalar.to_string()),
+                _ => None,
+            }
+        } else {
+            let alloc = tcx.eval_static_initializer(did).ok()?;
+            let inner = alloc.inner();
+            let range = rustc_middle::mir::interpret::alloc_range(
+                rustc_abi::Size::ZERO,
+                inner.size(),
+            );
+            let scalar = inner.read_scalar(&tcx, range, false).ok()?;
+            Some(scalar.to_string())
+        }
+    }
+
+    #[allow(dead_code)]
+    fn __evaluate__(&self) -> String {
+        todo!()
+        // theres a lot of  const_eval* functions that all do slightly different things.
+        // based off the docs, the potentailly interesting ones are:
+        //   const_eval_resolve(...) --> evaluate constant, resolving generic types as necessary.
+        //     this call can fail, if the resolved generics are still "too generic". Not sure if
+        //     constants like this can appear in the constants we are evaluating. maybe through
+        //     evaluating a const function that itself has a generic param as input?
+        //   const_eval_global_id(...) --> seems to be the most generic one? just evals const?
+        //   const_eval_instance(...) --> same as above, but with some default (?) parameters.
+        // based off https://rustc-dev-guide.rust-lang.org/const-eval.html, choosing _global_id().
+
+        // ANOTHER THING: it would be great to eval constants early, so that we do not need
+        // to recompute any of them when they are added to each ppt. With that said, evaluating
+        // here would mean it happens before any subexit ppts get created, which rely on the mir_built
+        // query. Executing this stuff, steals the result of mir_built however, which means this
+        // evaluation HAS TO BE DONE AFTER CREATING SUBEXITS, most likely whenever the file
+        // is actually being written then? Luckily query system should cache result, so
+        // "recomputing" constant value should actually be really quick and simple.
+
+        // let ty = tcx
+        //     .type_of(ldid)
+        //     .instantiate_identity()
+        //     .skip_normalization();
+
+        // let did = ldid.to_def_id();
+        // let ty_env = rustc_middle::ty::TypingEnv::fully_monomorphized();
+        // let instance = rustc_middle::ty::Instance::mono(tcx, did);
+        // let gid = rustc_middle::mir::interpret::GlobalId {
+        //     instance,
+        //     promoted: None,
+        // };
+
+        // let value_repr = match tcx.const_eval_global_id(ty_env, gid, rustc_span::DUMMY_SP) {
+        //     Ok(const_val) => {
+        //         let a = match const_val {
+        //             rustc_middle::mir::ConstValue::Scalar(scalar) => Some(scalar.to_string()),
+        //             rustc_middle::mir::ConstValue::ZeroSized => {
+        //                 // probably have const_var return an Option/Result instead at some point.
+        //                 // ZSTs probably shouldn't be included in the decls file anyways.
+        //                 panic!("ZSTs as const globals are unsupported.")
+        //             }
+        //             rustc_middle::mir::ConstValue::Slice { alloc_id, meta } => {
+        //                 // FIXME:
+        //                 // it's technically possible to peak at the allocation itself
+        //                 // using tcx.global_alloc(alloc_id). but at this point, we are working
+        //                 // with raw memory, i'd have to extract offsets to refer to meaningful values?
+        //                 // and generate the tag for the constant tag.
+        //                 // Once that's decided, change type of value_repr accordingly?
+        //                 match tcx.global_alloc(alloc_id) {
+        //                     rustc_const_eval::interpret::GlobalAlloc::Function { instance } => {}
+        //                     rustc_const_eval::interpret::GlobalAlloc::Memory(const_allocation) => {}
+        //                     rustc_const_eval::interpret::GlobalAlloc::TypeId { ty } => {
+        //                         panic!("Type constant in const variable?")
+        //                     }
+        //                     rustc_const_eval::interpret::GlobalAlloc::Static(def_id) => {
+        //                         panic!("Cannot determine value of lazy allocation at compile time.")
+        //                     }
+        //                     rustc_const_eval::interpret::GlobalAlloc::VTable(ty, raw_list) => {
+        //                         panic!("VTable constant found in const variable?")
+        //                     }
+        //                 }
+
+        //                 None
+        //             }
+        //             rustc_middle::mir::ConstValue::Indirect { alloc_id, offset } => {
+        //                 // FIXME: as above.
+        //                 match tcx.global_alloc(alloc_id) {
+        //                     rustc_const_eval::interpret::GlobalAlloc::Function { instance } => {}
+        //                     rustc_const_eval::interpret::GlobalAlloc::Memory(const_allocation) => {}
+        //                     rustc_const_eval::interpret::GlobalAlloc::VTable(ty, raw_list) => {
+        //                         panic!("VTable constant found in const variable?")
+        //                     }
+        //                     rustc_const_eval::interpret::GlobalAlloc::Static(def_id) => {
+        //                         panic!("Cannot determine value of lazy allocation at compile time.")
+        //                     }
+        //                     rustc_const_eval::interpret::GlobalAlloc::TypeId { ty } => {
+        //                         panic!("Type constant in const variable?")
+        //                     }
+        //                 }
+
+        //                 None
+        //             }
+        //         };
+        //         a
+        //     }
+        //     Err(e) => {
+        //         panic!("Unable to evaluate constant {const_name}: {e:?}");
+        //     }
+        // };
     }
 }

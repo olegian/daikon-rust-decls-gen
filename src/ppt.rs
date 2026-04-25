@@ -1,4 +1,4 @@
-use crate::fields::{DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl};
+use crate::fields::{DecType, Global, ParentRelationType, ProgramPointType, VarKind, VariableDecl};
 
 #[derive(Debug)]
 pub struct ProgramPoint {
@@ -54,30 +54,33 @@ impl ProgramPoint {
 
     /// Register the program point with name `parent_ppt` as a parent of
     /// this program point, with the given relation type and id.
-    pub fn add_parent(
-        &mut self,
+    pub fn with_parent(
+        mut self,
         parent_ppt: String,
         relation_type: ParentRelationType,
-        relation_id: u64,
-    ) {
+        relation_id: &mut u64,
+    ) -> Self {
         if self.parents.contains_key(&parent_ppt) {
             panic!("{parent_ppt} is already a parent!")
         }
 
         self.parents
-            .insert(parent_ppt, (relation_type, relation_id));
+            .insert(parent_ppt, (relation_type, *relation_id));
+        *relation_id += 1;
+
+        self
     }
 
     /// Add the return value (and all recursive values inside the return)
     /// to this program point. If the return type is unit, does nothing.
-    pub fn include_fn_return<'b>(
-        &mut self,
+    pub fn with_fn_return<'b>(
+        mut self,
         tcx: &rustc_middle::ty::TyCtxt<'b>,
         ret_ty: rustc_middle::ty::Ty<'b>,
         max_recursive_depth: Option<usize>,
-    ) {
+    ) -> Self {
         if ret_ty.is_unit() {
-            return;
+            return self;
         }
         self.add_var(
             tcx,
@@ -87,21 +90,24 @@ impl ProgramPoint {
             VarKind::Return,
             max_recursive_depth,
             false,
+            None,
         );
+
+        self
     }
 
     /// Add all function inputs (formals) to this program point.
     ///
     /// `inputs` is an iterator that nets items (var_name: String, var_type: mir::Ty).
-    pub fn include_fn_inputs<'a, 'b>(
-        &mut self,
+    pub fn with_fn_inputs<'a, 'b>(
+        mut self,
         tcx: &'a rustc_middle::ty::TyCtxt<'b>,
         // i really think there is a better way to represent this, but
         // because we are pulling names off the HIR body and types off the MIR,
         // i'm not sure if there is a unified existing representation for it.
         inputs: impl Iterator<Item = (String, &'a rustc_middle::ty::Ty<'b>)>,
         max_recursive_depth: Option<usize>,
-    ) {
+    ) -> Self {
         for (name, ty) in inputs {
             self.add_var(
                 tcx,
@@ -111,8 +117,38 @@ impl ProgramPoint {
                 VarKind::Variable,
                 max_recursive_depth,
                 false,
+                None,
             );
         }
+
+        self
+    }
+
+    pub fn with_globals<'a, 'tcx>(
+        mut self,
+        tcx: &'a rustc_middle::ty::TyCtxt<'tcx>,
+        globals: &[Global],
+        max_recursive_depth: Option<usize>,
+    ) -> Self {
+        for global in globals {
+            let ty = tcx
+                .type_of(global.ldid)
+                .instantiate_identity()
+                .skip_normalization();
+
+            self.add_var(
+                &tcx,
+                global.name.clone(),
+                ty,
+                None,
+                VarKind::Variable,
+                max_recursive_depth,
+                false,
+                Some(global),
+            )
+        }
+
+        self
     }
 
     /// Emit a record for the variable `name: ty`. If the type is a
@@ -122,6 +158,11 @@ impl ProgramPoint {
     /// `parent` is the enclosing variable's fully-qualified name, or `None`.
     /// `var_kind` describes how this variable relates to its parent
     /// `in_array` used to stop reporting sequences of sequences, sticky parameter.
+    /// TODO: is_const needs to actually evaluate the const (at the appropriate offset)
+    /// and then properly add the field to the emitted var_decl.
+    /// Potentially modify the type of is_const to be an Option<SomeType> where SomeType
+    /// is able to encode the type information necessary to determine the constant value.
+    /// (match it up with return of Global::evaluate).
     fn add_var<'b>(
         &mut self,
         tcx: &rustc_middle::ty::TyCtxt<'b>,
@@ -131,6 +172,7 @@ impl ProgramPoint {
         var_kind: VarKind,
         remaining_recursive_depth: Option<usize>,
         in_array: bool,
+        global: Option<&Global>,
     ) {
         if let Some(remaining_depth) = remaining_recursive_depth
             && remaining_depth == 0
@@ -147,16 +189,12 @@ impl ProgramPoint {
         // Any variable inside (or equal to) an array sequence has multiple
         // values, so it gets the <array 1> tag set, alongside any contained value.
         let in_array = in_array || matches!(var_kind, VarKind::Array);
-        self.variables.insert(
-            name.clone(),
-            VariableDecl::new(
-                var_kind,
-                DecType::from_ty(tcx, ty),
-                parent,
-                if in_array { 1 } else { 0 },
-                None,
-            ),
-        );
+        let mut var_decl =
+            VariableDecl::new(var_kind, DecType::from_ty(tcx, ty)).with_enclosing_var(parent);
+        if in_array {
+            var_decl = var_decl.with_array(Some(1));
+        }
+        self.variables.insert(name.clone(), var_decl);
 
         match ty.kind() {
             // impossible, we peeled all refs already.
@@ -210,16 +248,13 @@ impl ProgramPoint {
                 }
 
                 let len_name = format!("{}.length", name);
-                self.variables.insert(
-                    len_name,
-                    VariableDecl::new(
-                        VarKind::Field("length".to_string()),
-                        DecType::Usize,
-                        Some(name.clone()),
-                        if in_array { 1 } else { 0 },
-                        None,
-                    ),
-                );
+                let mut var_decl =
+                    VariableDecl::new(VarKind::Field("length".to_string()), DecType::Usize)
+                        .with_enclosing_var(Some(name.clone()));
+                if in_array {
+                    var_decl = var_decl.with_array(Some(1));
+                }
+                self.variables.insert(len_name, var_decl);
 
                 let elem_name = format!("{}[..]", name);
                 self.add_var(
@@ -230,6 +265,7 @@ impl ProgramPoint {
                     VarKind::Array,
                     remaining_recursive_depth.map(|remaining| remaining - 1),
                     in_array,
+                    global,
                 );
             }
 
@@ -246,6 +282,7 @@ impl ProgramPoint {
                         VarKind::Field(rel),
                         remaining_recursive_depth.map(|remaining| remaining - 1),
                         in_array,
+                        global,
                     );
                 }
             }
@@ -263,6 +300,7 @@ impl ProgramPoint {
                         &generics[..],
                         remaining_recursive_depth,
                         in_array,
+                        global,
                     );
                     return;
                 }
@@ -285,6 +323,7 @@ impl ProgramPoint {
                                 VarKind::Field(field_name),
                                 remaining_recursive_depth.map(|remaining| remaining - 1),
                                 in_array,
+                                global,
                             );
                         }
                     }
@@ -311,6 +350,7 @@ impl ProgramPoint {
                                     VarKind::Field(rel),
                                     remaining_recursive_depth.map(|remaining| remaining - 1),
                                     in_array,
+                                    global,
                                 );
                             }
                         }
@@ -331,6 +371,7 @@ impl ProgramPoint {
         adt_generics: &[rustc_middle::ty::GenericArg<'tcx>],
         remaining_recursive_depth: Option<usize>,
         in_array: bool,
+        global: Option<&Global>,
     ) {
         let lang_items = tcx.lang_items();
         if tcx.is_diagnostic_item(rustc_span::symbol::sym::Vec, adt_did) {
@@ -345,16 +386,13 @@ impl ProgramPoint {
             }
 
             let len_name = format!("{}.length", name);
-            self.variables.insert(
-                len_name,
-                VariableDecl::new(
-                    VarKind::Field("length".to_string()),
-                    DecType::Usize,
-                    Some(name.clone()),
-                    if in_array { 1 } else { 0 },
-                    None,
-                ),
-            );
+            let mut var_decl =
+                VariableDecl::new(VarKind::Field("length".to_string()), DecType::Usize)
+                    .with_enclosing_var(Some(name.clone()));
+            if in_array {
+                var_decl = var_decl.with_array(Some(1));
+            }
+            self.variables.insert(len_name, var_decl);
 
             let elem_ty = adt_generics[0]
                 .as_type()
@@ -368,8 +406,8 @@ impl ProgramPoint {
                 VarKind::Array,
                 remaining_recursive_depth.map(|remaining| remaining - 1),
                 in_array,
+                global,
             );
-
         } else if adt_did
             == lang_items
                 .owned_box()
@@ -397,6 +435,7 @@ impl ProgramPoint {
                 VarKind::Variable,
                 remaining_recursive_depth.map(|remain| remain - 1),
                 in_array,
+                global,
             );
         } else if adt_did
             == lang_items
