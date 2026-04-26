@@ -7,8 +7,14 @@ pub struct Global {
 }
 
 impl<'a> Global {
-    pub fn new(ldid: rustc_span::def_id::LocalDefId, file_name: &str, mod_path: &str) -> Global {
-        let name = format!("{}::{}", file_name, mod_path);
+    pub fn new<'tcx>(
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_span::def_id::LocalDefId,
+    ) -> Global {
+        let name = crate::decls::DeclsFile::var_name(
+            tcx,
+            crate::decls::VarIdent::Global(ldid.to_def_id()),
+        );
         Self { name, ldid }
     }
 

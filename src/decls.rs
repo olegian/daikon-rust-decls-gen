@@ -258,6 +258,48 @@ impl DeclsFile {
     pub fn add_program_point(&mut self, name: String, ppt: ProgramPoint) {
         self.ppts.insert(name, ppt);
     }
+    /// Compute the fully qualified base ppt name for a function or method,
+    /// without any `:::ENTER` / `:::EXIT` / `:::EXIT{N}` suffix.
+    /// Can be used to query for all ENTER/EXIT/EXITNN ppts that correspond
+    /// to this base name, via DeclsFile::ppts_for().
+    pub fn ppt_base_name<'tcx>(
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+    ) -> String {
+        let file = file_name_of(tcx, tcx.def_span(ldid));
+        let path = tcx.def_path_str(ldid);
+        format!("{file}::{path}")
+    }
+
+    /// Compute the variable key used to look up a VariableDecl inside a
+    /// ProgramPoint. Globals get a fully qualified <file_path>::<def_path>.
+    /// formals/return get their normal name.
+    pub fn var_name<'tcx>(tcx: rustc_middle::ty::TyCtxt<'tcx>, v: VarIdent) -> String {
+        match v {
+            VarIdent::Local(name) => name,
+            VarIdent::Return => "return".to_string(),
+            VarIdent::Global(did) => {
+                let file = file_name_of(tcx, tcx.def_span(did));
+                let path = tcx.def_path_str(did);
+                format!("{file}::{path}")
+            }
+        }
+    }
+
+    /// get all program points (ENTER, EXIT, every EXITNN) for the given base ppt
+    /// name. 
+    pub fn ppts_for(&self, base_ppt_name: &str) -> Vec<&ProgramPoint> {
+        let lo = format!("{base_ppt_name}:::");   // can probably start with Enter? but eh
+        let hi = format!("{base_ppt_name}:::~");  // ~ --> 0x7E will sort after any digit/letter
+        self.ppts.range(lo..hi).map(|(_, p)| p).collect()
+    }
+
+    /// see DeclsFile::ppts_for
+    pub fn ppts_for_mut(&mut self, base_ppt_name: &str) -> Vec<&mut ProgramPoint> {
+        let lo = format!("{base_ppt_name}:::");
+        let hi = format!("{base_ppt_name}:::~");
+        self.ppts.range_mut(lo..hi).map(|(_, p)| p).collect()
+    }
 
     pub fn get_program_point_mut(&mut self, name: &str) -> Option<&mut ProgramPoint> {
         self.ppts.get_mut(name)
@@ -274,4 +316,26 @@ impl DeclsFile {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&std::string::String, &mut ProgramPoint)> {
         self.ppts.iter_mut()
     }
+
+}
+
+/// Identifies a variable for DeclsFile::var_name. Use Global
+/// for any const or static item. Local for a formal parameter.
+/// Return for the return value.
+pub enum VarIdent {
+    Local(String),
+    Return,
+    Global(rustc_hir::def_id::DefId),
+}
+
+/// Absolute path of the source file containing span.
+pub(crate) fn file_name_of<'tcx>(
+    tcx: rustc_middle::ty::TyCtxt<'tcx>,
+    span: rustc_span::Span,
+) -> String {
+    let rustc_span::FileName::Real(rfn) = tcx.sess.source_map().span_to_filename(span) else {
+        panic!("Attempting to get file name of span without an associated real file.");
+    };
+    // no extension? with extension?
+    rfn.local_path().unwrap().display().to_string()
 }

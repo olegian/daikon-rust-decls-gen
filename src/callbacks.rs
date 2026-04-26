@@ -61,10 +61,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                     match item.kind {
                         // Free functions
                         rustc_hir::ItemKind::Fn { body, .. } => {
-                            // Get name of ppts related to this function
-                            let file_name = get_containing_file_name(compiler, item.span);
-                            let mod_path = tcx.def_path_str(ldid);
-                            let base_ppt_name = format!("{}::{}", file_name, mod_path);
+                            let base_ppt_name = decls::DeclsFile::ppt_base_name(tcx, ldid);
 
                             // extract relevant information regarding the function signature
                             let body = tcx.hir_body(body);
@@ -107,8 +104,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
 
                         // Associated functions (inherent and trait impls)
                         rustc_hir::ItemKind::Impl(rustc_hir::Impl { self_ty, items, .. }) => {
-                            let file_name = get_containing_file_name(compiler, item.span);
-                            let rustc_hir::TyKind::Path(rustc_hir::QPath::Resolved(_, path)) =
+                            let rustc_hir::TyKind::Path(rustc_hir::QPath::Resolved(_, _)) =
                                 self_ty.kind
                             else {
                                 panic!("Encountered impl block with non-Path kind self ty");
@@ -126,8 +122,8 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 };
 
                                 // base_ppt_name is the fully qualified name, minus the :::PPT_TYPE
-                                let mod_path = tcx.def_path_str(method_ldid);
-                                let base_ppt_name = format!("{}::{}", file_name, mod_path,);
+                                let base_ppt_name =
+                                    decls::DeclsFile::ppt_base_name(tcx, method_ldid);
 
                                 // collect all names of input parameters
                                 let body = tcx.hir_body(body_id);
@@ -183,7 +179,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
 
         // discover and add all globals to each ppt for which they are in scope,
         // evaluating them if they are a constant value.
-        self.add_globals(compiler, tcx);
+        self.add_globals(tcx);
 
         rustc_driver::Compilation::Stop
     }
@@ -194,11 +190,7 @@ impl ConstructDecls {
     /// each one to every program point that has access to the const. 
     /// Must be called after every ppt's subexits have already been constructed,
     /// to avoid MIR stealing issues.
-    fn add_globals<'tcx>(
-        &mut self,
-        compiler: &rustc_interface::interface::Compiler,
-        tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    ) {
+    fn add_globals<'tcx>(&mut self, tcx: rustc_middle::ty::TyCtxt<'tcx>) {
         // collect all globals in the entire crate.
         // we will resolve which ones are visible where later.
         let items = tcx.hir_crate_items(());
@@ -209,9 +201,7 @@ impl ConstructDecls {
                 match item.kind {
                     rustc_hir::ItemKind::Static(_, _, _, _)
                     | rustc_hir::ItemKind::Const(_, _, _, _) => {
-                        let file_name = get_containing_file_name(compiler, item.span);
-                        let mod_path = tcx.def_path_str(ldid);
-                        globals.push(Global::new(ldid, &file_name, &mod_path));
+                        globals.push(Global::new(tcx, ldid));
                     }
                     _ => {}
                 }
@@ -357,16 +347,4 @@ impl ConstructDecls {
                 .add_program_point(subexit_name.clone(), subexit_ppt);
         }
     }
-}
-
-/// Returns the absolute path to the file which contains the input span.
-fn get_containing_file_name(
-    compiler: &rustc_interface::interface::Compiler,
-    span: rustc_span::Span,
-) -> String {
-    let rustc_span::FileName::Real(rfn) = compiler.sess.source_map().span_to_filename(span) else {
-        panic!("Attempting to get file name of span without an associated real file.");
-    };
-    let file_path = rfn.local_path().unwrap().with_extension("");
-    file_path.display().to_string()
 }
