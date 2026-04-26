@@ -1,8 +1,4 @@
-use crate::{
-    decls,
-    fields::{Global, ParentRelationType},
-    ppt::ProgramPoint,
-};
+use crate::{decls, fields::ParentRelationType, globals::Global, ppt::ProgramPoint};
 
 #[derive(Default)]
 pub struct ConstructDecls {
@@ -55,35 +51,20 @@ impl rustc_driver::Callbacks for ConstructDecls {
         // find crate that contains generic template?
         // Instance::upstream_monomorphization(&self, tcx)
 
+        // Create all ENTER/EXIT PPTs, adding all formals/returns to
+        // each appropriate one.
         let items = tcx.hir_crate_items(());
-        // find all const/static items vars first. These vars
-        // will be included at all program points.
-        let mut globals: Vec<Global> = Vec::new();
-        for ldid in items.definitions() {
-            let node = tcx.hir_node_by_def_id(ldid);
-            match node {
-                rustc_hir::Node::Item(item) => match item.kind {
-                    rustc_hir::ItemKind::Static(_, ident, _, _)
-                    | rustc_hir::ItemKind::Const(ident, _, _, _) => {
-                        let file_name = get_containing_file_name(compiler, item.span);
-                        globals.push(Global::new(ldid, file_name, ident));
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-
         for ldid in items.definitions() {
             let node = tcx.hir_node_by_def_id(ldid);
             match node {
                 rustc_hir::Node::Item(item) => {
                     match item.kind {
                         // Free functions
-                        rustc_hir::ItemKind::Fn { ident, body, .. } => {
+                        rustc_hir::ItemKind::Fn { body, .. } => {
                             // Get name of ppts related to this function
                             let file_name = get_containing_file_name(compiler, item.span);
-                            let base_ppt_name = format!("{}.{}", file_name, ident.as_str());
+                            let mod_path = tcx.def_path_str(ldid);
+                            let base_ppt_name = format!("{}::{}", file_name, mod_path);
 
                             // extract relevant information regarding the function signature
                             let body = tcx.hir_body(body);
@@ -108,9 +89,9 @@ impl rustc_driver::Callbacks for ConstructDecls {
                             let enter_name = self.add_enter_ppt(
                                 tcx,
                                 &base_ppt_name,
+                                ldid,
                                 &param_names,
                                 &input_tys,
-                                &globals,
                             );
                             self.add_exit_ppts(
                                 compiler,
@@ -121,7 +102,6 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 &param_names,
                                 &input_tys,
                                 return_ty,
-                                &globals,
                             );
                         }
 
@@ -134,26 +114,22 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 panic!("Encountered impl block with non-Path kind self ty");
                             };
 
-                            let self_ty = path
-                                .segments
-                                .iter()
-                                .map(|seg| seg.ident.as_str())
-                                .collect::<Vec<_>>()
-                                .join(".");
-
                             for assoc_item in items {
                                 let method_ldid = assoc_item.owner_id.def_id;
                                 let owner = tcx.hir_expect_impl_item(method_ldid);
 
+                                // FIXME:
                                 // for now, we only care about assoc functions. we probably
-                                // should also do something with constants though
+                                // should also do something with assoc constants though?
                                 let rustc_hir::ImplItemKind::Fn(_sig, body_id) = owner.kind else {
                                     continue;
                                 };
 
-                                let base_ppt_name =
-                                    format!("{}.{}.{}", file_name, self_ty, owner.ident.as_str());
+                                // base_ppt_name is the fully qualified name, minus the :::PPT_TYPE
+                                let mod_path = tcx.def_path_str(method_ldid);
+                                let base_ppt_name = format!("{}::{}", file_name, mod_path,);
 
+                                // collect all names of input parameters
                                 let body = tcx.hir_body(body_id);
                                 let param_names: Vec<String> = body
                                     .params
@@ -169,6 +145,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                     })
                                     .collect();
 
+                                // collect all input/output relevant types, combine with names.
                                 let sig =
                                     tcx.fn_sig(method_ldid).instantiate_identity().skip_binder();
                                 let input_tys: Vec<_> = sig.inputs().iter().copied().collect();
@@ -177,9 +154,9 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                 let enter_name = self.add_enter_ppt(
                                     tcx,
                                     &base_ppt_name,
+                                    method_ldid,
                                     &param_names,
                                     &input_tys,
-                                    &globals,
                                 );
                                 self.add_exit_ppts(
                                     compiler,
@@ -190,7 +167,6 @@ impl rustc_driver::Callbacks for ConstructDecls {
                                     &param_names,
                                     &input_tys,
                                     return_ty,
-                                    &globals,
                                 );
                             }
                         }
@@ -205,42 +181,67 @@ impl rustc_driver::Callbacks for ConstructDecls {
             };
         }
 
-        // Evaluate all constants here, after every program point (including
-        // subexits, which depend on `mir_built`) has been constructed. Then
-        // tag every matching top-level var-decl with its compile-time value.
-        for global in &globals {
-            let Some(value) = global.evaluate(tcx) else {
-                continue;
-            };
-            for (_, ppt) in self.decls.iter_mut() {
-                if let Some(var) = ppt.get_var_mut(&global.name) {
-                    var.set_constant(Some(value.clone()));
-                }
-            }
-        }
+        // discover and add all globals to each ppt for which they are in scope,
+        // evaluating them if they are a constant value.
+        self.add_globals(compiler, tcx);
 
         rustc_driver::Compilation::Stop
     }
 }
 
 impl ConstructDecls {
+    /// Discovers all const/static items in the crate and adds a var-decl for
+    /// each one to every program point that has access to the const. 
+    /// Must be called after every ppt's subexits have already been constructed,
+    /// to avoid MIR stealing issues.
+    fn add_globals<'tcx>(
+        &mut self,
+        compiler: &rustc_interface::interface::Compiler,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+    ) {
+        // collect all globals in the entire crate.
+        // we will resolve which ones are visible where later.
+        let items = tcx.hir_crate_items(());
+        let mut globals: Vec<Global> = Vec::new();
+        for ldid in items.definitions() {
+            let node = tcx.hir_node_by_def_id(ldid);
+            if let rustc_hir::Node::Item(item) = node {
+                match item.kind {
+                    rustc_hir::ItemKind::Static(_, _, _, _)
+                    | rustc_hir::ItemKind::Const(_, _, _, _) => {
+                        let file_name = get_containing_file_name(compiler, item.span);
+                        let mod_path = tcx.def_path_str(ldid);
+                        globals.push(Global::new(ldid, &file_name, &mod_path));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // allows us to determine which globals are in scope at each ppt.
+        let eff_vis = tcx.effective_visibilities(());
+
+        // add a var-decl for each global to each ppt
+        for (_, ppt) in self.decls.iter_mut() {
+            ppt.add_globals(tcx, eff_vis, &globals, self.max_recursive_depth);
+        }
+    }
+
     /// Adds the enter program point, given the provided input, to the decls file.
     fn add_enter_ppt<'tcx>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         base_ppt_name: &str,
+        local_def_id: rustc_hir::def_id::LocalDefId,
         param_names: &[String],
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
-        globals: &[Global],
     ) -> String {
-        let (enter_name, enter_ppt) = ProgramPoint::enter(&base_ppt_name);
-        let enter_ppt = enter_ppt
-            .with_fn_inputs(
-                &tcx,
-                param_names.iter().cloned().zip(input_tys.iter()),
-                self.max_recursive_depth,
-            )
-            .with_globals(&tcx, globals, self.max_recursive_depth);
+        let (enter_name, enter_ppt) = ProgramPoint::enter(&base_ppt_name, local_def_id);
+        let enter_ppt = enter_ppt.with_fn_inputs(
+            tcx,
+            param_names.iter().cloned().zip(input_tys.iter()),
+            self.max_recursive_depth,
+        );
 
         self.decls.add_program_point(enter_name.clone(), enter_ppt);
         enter_name
@@ -258,18 +259,16 @@ impl ConstructDecls {
         param_names: &[String],
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
         return_ty: rustc_middle::ty::Ty<'tcx>,
-        globals: &[Global],
     ) {
         // Add abstract EXIT point before handling any EXITNN's
-        let (exit_name, exit_ppt) = ProgramPoint::exit(base_ppt_name);
+        let (exit_name, exit_ppt) = ProgramPoint::exit(base_ppt_name, ldid);
         let exit_ppt = exit_ppt
             .with_fn_inputs(
-                &tcx,
+                tcx,
                 param_names.iter().cloned().zip(input_tys.iter()),
                 self.max_recursive_depth,
             )
-            .with_fn_return(&tcx, return_ty, self.max_recursive_depth)
-            .with_globals(&tcx, globals, self.max_recursive_depth)
+            .with_fn_return(tcx, return_ty, self.max_recursive_depth)
             .with_parent(
                 // exit has parent tag refering to enter
                 enter_name,
@@ -281,6 +280,8 @@ impl ConstructDecls {
 
         // Add EXITNN's:
         // get mir representation of the function of interest
+        // remember that mir is a CFG, which means it should have basic blocks
+        // which jump out of the current function. these are our "return locations".
         let mir = tcx.mir_built(ldid).borrow();
         let source_map = compiler.sess.source_map();
 
@@ -336,15 +337,15 @@ impl ConstructDecls {
             }
             assigned.insert(candidate);
 
-            let (subexit_name, subexit_ppt) = ProgramPoint::subexit(base_ppt_name, candidate);
+            // create a subexit for each line number
+            let (subexit_name, subexit_ppt) = ProgramPoint::subexit(base_ppt_name, ldid, candidate);
             let subexit_ppt = subexit_ppt
                 .with_fn_inputs(
-                    &tcx,
+                    tcx,
                     param_names.iter().cloned().zip(input_tys.iter()),
                     self.max_recursive_depth,
                 )
-                .with_fn_return(&tcx, return_ty, self.max_recursive_depth)
-                .with_globals(&tcx, globals, self.max_recursive_depth)
+                .with_fn_return(tcx, return_ty, self.max_recursive_depth)
                 .with_parent(
                     // subexits get parent tag pointing to abstract exit.
                     exit_name.clone(),

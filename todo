@@ -41,3 +41,13 @@ QUESTIONS:
 4/24
 CONST evaluation context. There exist functions that can be called from a constant, compile time context. should these be special cased at all?
   - they can be called at runtime too --> implies they should also be included in decls files
+
+4/25
+Using BTreeMap everywhere to have ordered output. Replace with HashMap for performance later.
+FN_INITED_CONST is a slice type that is not being correctly treated as a fixed len array.
+ARRAY_COSNT_BLOCK_STR_SLICE is not having its leaf decls emit a constant tag.
+ARRAY_CONST_BLOCK_STRING, with a String type, is not having a constant tag emit.
+  - String types in const setting can only be empty, maybe not super meaningful. Only `new` constructor is const.
+Module resolution needs to be done on top of file path resolution for all identifiers, namely ppts.
+
+

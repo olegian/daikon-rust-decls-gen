@@ -9,9 +9,10 @@ use crate::{
 // include header information as well?
 #[derive(Debug, Default)]
 pub struct DeclsFile {
-    ppts: std::collections::HashMap<String, ProgramPoint>,
+    ppts: std::collections::BTreeMap<String, ProgramPoint>,
 }
 
+// Creates a string representation of the entire decls file, in the .decls format.
 impl<'a> std::fmt::Display for DeclsFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "decl-version 2.0")?;
@@ -43,7 +44,7 @@ pub enum DeclsFileParseError {
     FileError(std::io::Error),
     BadHeader(&'static str),
     BadStructure(&'static str),
-    // Would be really nice to make this identify which ppt was the offending one.
+    // FIXME: would be really nice to make this identify which ppt was the offending one.
     MalformedPpt,
 }
 
@@ -108,8 +109,8 @@ impl DeclsFile {
                 _ => return Err(DeclsFileParseError::MalformedPpt),
             };
 
-            let mut parents = std::collections::HashMap::new();
-            let mut variables = std::collections::HashMap::new();
+            let mut parents = std::collections::BTreeMap::new();
+            let mut variables = std::collections::BTreeMap::new();
 
             // Parent lines
             while let Some(peek) = lines.peek() {
@@ -151,6 +152,7 @@ impl DeclsFile {
                 let mut dec_type: Option<DecType> = None;
                 let mut enclosing_var: Option<String> = None;
                 let mut array: Option<u8> = None;
+                let mut constant: Option<String> = None;
                 let mut comparability: Option<i64> = None;
 
                 while let Some(field_line) = lines.peek() {
@@ -159,8 +161,10 @@ impl DeclsFile {
                         || trimmed.starts_with("variable ")
                         || trimmed.starts_with("parent ")
                     {
+                        // end of current variable block, move onto next
                         break;
                     }
+
                     lines.next();
 
                     if let Some(rest) = trimmed.strip_prefix("var-kind ") {
@@ -190,6 +194,8 @@ impl DeclsFile {
                             rest.parse::<u8>()
                                 .map_err(|_| DeclsFileParseError::MalformedPpt)?,
                         );
+                    } else if let Some(rest) = trimmed.strip_prefix("constant ") {
+                        constant = Some(rest.to_string());
                     } else if let Some(rest) = trimmed.strip_prefix("comparability ") {
                         let v: i64 = rest
                             .parse()
@@ -206,19 +212,15 @@ impl DeclsFile {
                 )
                 .with_enclosing_var(enclosing_var)
                 .with_array(array)
+                .with_constant(constant)
                 .with_comparability(comparability);
 
                 variables.insert(var_name, var_decl);
             }
 
-            decls.ppts.insert(
-                ppt_name,
-                ProgramPoint {
-                    ppt_type,
-                    variables,
-                    parents,
-                },
-            );
+            decls
+                .ppts
+                .insert(ppt_name, ProgramPoint::new(ppt_type, variables, parents));
         }
 
         Ok(decls)
