@@ -55,6 +55,20 @@ fn globals() {
 }
 
 #[test]
+#[ignore]
+fn globals_parse() {
+    let cwd = std::env::current_dir().unwrap();
+    let test_file = cwd.join("tests/globals/main.rs");
+    let decls = decls_gen::DeclsFile::from_source_file(&test_file, None);
+
+    let out_file = cwd.join("tests/globals/globals.decls");
+    decls.write_to_file(&out_file).unwrap();
+
+    let decls_parsed = decls_gen::DeclsFile::from_decls_file(&out_file).unwrap();
+    println!("{:#?}", decls_parsed);
+}
+
+#[test]
 fn globals_visibility() {
     let cwd = std::env::current_dir().unwrap();
     let test_file = cwd.join("tests/globals_visibility/main.rs");

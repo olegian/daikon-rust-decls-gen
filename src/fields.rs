@@ -1,3 +1,5 @@
+use crate::VarName;
+
 #[derive(Debug)]
 pub enum ProgramPointType {
     Enter,
@@ -228,7 +230,7 @@ impl std::convert::From<&str> for DecType {
 pub struct VariableDecl {
     var_kind: VarKind,
     dec_type: DecType,
-    enclosing_var: Option<String>,
+    enclosing_var: Option<VarName>,
     array: Option<u8>,
     constant: Option<String>,
     comparability: Option<i64>,
@@ -251,7 +253,7 @@ impl VariableDecl {
         self
     }
 
-    pub fn with_enclosing_var(mut self, enclosing_var: Option<String>) -> Self {
+    pub fn with_enclosing_var(mut self, enclosing_var: Option<VarName>) -> Self {
         self.enclosing_var = enclosing_var;
         self
     }

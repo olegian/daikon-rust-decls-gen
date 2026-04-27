@@ -1,6 +1,8 @@
 use crate::{
+    decls::{FIELD_LENGTH, RETURN_VAR_NAME},
     fields::{DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
     globals::{ConstSource, Global},
+    vars::VarName,
 };
 
 #[derive(Debug)]
@@ -108,7 +110,7 @@ impl ProgramPoint {
         }
         self.add_var(
             tcx,
-            "return".to_string(),
+            VarName::new(RETURN_VAR_NAME),
             &ret_ty,
             None,
             VarKind::Return,
@@ -135,7 +137,7 @@ impl ProgramPoint {
         for (name, ty) in inputs {
             self.add_var(
                 tcx,
-                name,
+                VarName::new(name),
                 ty,
                 None,
                 VarKind::Variable,
@@ -173,7 +175,7 @@ impl ProgramPoint {
                         .to_def_id()
                 })
                 .unwrap_or_else(|| {
-                    // evs will only contain items which are visible from outside of 
+                    // evs will only contain items which are visible from outside of
                     // their own parent modules. Not all items are therefore stored in
                     // evs, as some of them are private / otherwise do not escape the parent.
 
@@ -200,7 +202,7 @@ impl ProgramPoint {
 
                 self.add_var(
                     tcx,
-                    global.name.clone(),
+                    VarName::new(global.name.clone()),
                     &ty,
                     None,
                     VarKind::Variable,
@@ -216,22 +218,22 @@ impl ProgramPoint {
     /// compound type, recursively emit records for its contained variables.
     ///
     /// `name` is the fully-qualified variable name (e.g. "arr[..].field").
-    /// `parent` is the enclosing variable's fully-qualified name (e.g. "arr[..]"), 
+    /// `parent` is the enclosing variable's fully-qualified name (e.g. "arr[..]"),
     ///    or None (in which case the name` var is the root.)
     /// `var_kind` describes how this variable relates to its parent, described by the
     ///    .decls file format specification.
     /// `in_array` is sticky and stops reporting sequences of sequences.
     ///    It should always be initially set to false.
     /// `const_source`, when present, evaluates the compile-time constant described
-    ///    the variable. each leaf is tagged with its constant value. 
+    ///    the variable. each leaf is tagged with its constant value.
     ///    further, when Some, arrays/slices are expanded into per-element
     ///    var-decls (p[0], p[1], ...) instead of the collapsed [..] sequence.
     fn add_var<'b>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'b>,
-        name: String,
+        name: VarName,
         ty: &rustc_middle::ty::Ty<'b>,
-        parent: Option<String>,
+        parent: Option<VarName>,
         var_kind: VarKind,
         remaining_recursive_depth: Option<usize>,
         in_array: bool,
@@ -268,9 +270,9 @@ impl ProgramPoint {
                         ConstSource::Indirect(_, _),
                         rustc_type_ir::TyKind::Slice(_) | rustc_type_ir::TyKind::Str,
                     ) => {
-                        // ... in which case we have to create a type we can actually 
+                        // ... in which case we have to create a type we can actually
                         src.load_fat_ptr_to_slice(tcx)
-                    },
+                    }
                     _ => Some(src),
                 };
             }
@@ -292,7 +294,7 @@ impl ProgramPoint {
         // If a const source is available, attach a constant tag for this decl.
         // Primitives get their actual value
         // &str gets a decoded string;
-        // FIXME: compound types get a TEMP_PTR placeholder for now, but are then 
+        // FIXME: compound types get a TEMP_PTR placeholder for now, but are then
         // recursively expanded
         if let Some(src) = &const_source {
             let constant = match ty.kind() {
@@ -306,7 +308,9 @@ impl ProgramPoint {
                 // so any const-evaluatable String is the empty string.
                 // in the future, if that ever changes, this will need to as well.
                 _ if matches!(dec_type, DecType::String) => Some("\"\"".to_string()),
-                _ if matches!(dec_type, DecType::Compound(_)) => Some("TEMPORARY_PTR_PLACEHOLDER".to_string()),
+                _ if matches!(dec_type, DecType::Compound(_)) => {
+                    Some("TEMPORARY_PTR_PLACEHOLDER".to_string())
+                }
                 _ => None,
             };
             if constant.is_some() {
@@ -314,7 +318,7 @@ impl ProgramPoint {
             }
         }
 
-        self.variables.insert(name.clone(), var_decl);
+        self.variables.insert(name.as_str().to_string(), var_decl);
 
         match ty.kind() {
             // impossible, we peeled all refs already.
@@ -355,17 +359,17 @@ impl ProgramPoint {
             rustc_type_ir::TyKind::Array(inner, count_const) => {
                 let static_count = count_const.try_to_target_usize(tcx);
                 if let (Some(src), Some(n)) = (const_source, static_count) {
-                    let len_name = format!("{}.length", name);
+                    let len_name = name.project_field(FIELD_LENGTH);
                     let mut len_decl =
-                        VariableDecl::new(VarKind::Field("length".to_string()), DecType::Usize)
+                        VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                             .with_enclosing_var(Some(name.clone()));
                     len_decl.set_constant(Some(n.to_string()));
-                    self.variables.insert(len_name, len_decl);
+                    self.variables.insert(len_name.into_string(), len_decl);
 
                     for i in 0..n {
                         let child_src = src.project_field(tcx, ty, i as usize);
                         let rel = format!("[{}]", i);
-                        let child_name = format!("{}[{}]", name, i);
+                        let child_name = name.project_index(i as usize);
                         self.add_var(
                             tcx,
                             child_name,
@@ -381,13 +385,13 @@ impl ProgramPoint {
                     if in_array {
                         return;
                     }
-                    let len_name = format!("{}.length", name);
+                    let len_name = name.project_field(FIELD_LENGTH);
                     let len_decl =
-                        VariableDecl::new(VarKind::Field("length".to_string()), DecType::Usize)
+                        VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                             .with_enclosing_var(Some(name.clone()));
-                    self.variables.insert(len_name, len_decl);
+                    self.variables.insert(len_name.into_string(), len_decl);
 
-                    let elem_name = format!("{}[..]", name);
+                    let elem_name = name.project_slice();
                     self.add_var(
                         tcx,
                         elem_name,
@@ -408,7 +412,7 @@ impl ProgramPoint {
                     for i in 0..n {
                         let child_src = src.project_slice_elem(tcx, *inner, i);
                         let rel = format!("[{}]", i);
-                        let child_name = format!("{}[{}]", name, i);
+                        let child_name = name.project_index(i as usize);
                         self.add_var(
                             tcx,
                             child_name,
@@ -424,13 +428,13 @@ impl ProgramPoint {
                     if in_array {
                         return;
                     }
-                    let len_name = format!("{}.length", name);
+                    let len_name = name.project_field(FIELD_LENGTH);
                     let len_decl =
-                        VariableDecl::new(VarKind::Field("length".to_string()), DecType::Usize)
+                        VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                             .with_enclosing_var(Some(name.clone()));
-                    self.variables.insert(len_name, len_decl);
+                    self.variables.insert(len_name.into_string(), len_decl);
 
-                    let elem_name = format!("{}[..]", name);
+                    let elem_name = name.project_slice();
                     self.add_var(
                         tcx,
                         elem_name,
@@ -448,7 +452,7 @@ impl ProgramPoint {
             rustc_type_ir::TyKind::Tuple(inner_tys) => {
                 for (i, inner) in inner_tys.iter().enumerate() {
                     let rel = i.to_string();
-                    let child_name = format!("{}.{}", name, rel);
+                    let child_name = name.project_field(&rel);
                     let child_src = const_source.and_then(|s| s.project_field(tcx, ty, i));
                     self.add_var(
                         tcx,
@@ -492,7 +496,7 @@ impl ProgramPoint {
                                 .instantiate(tcx, generics)
                                 .skip_normalization();
 
-                            let child_name = format!("{}.{}", name, field_name);
+                            let child_name = name.project_field(&field_name);
                             let child_src = const_source.and_then(|s| s.project_field(tcx, ty, i));
                             self.add_var(
                                 tcx,
@@ -514,7 +518,7 @@ impl ProgramPoint {
                         // on the discriminant, as in only one variant would make up the
                         // constant) isn't implemented yet.
                         // reading discriminants is just kinda hard... rust chooses to encode
-                        // the discriminant in some fancy ways (lookup Variants::Multiple 
+                        // the discriminant in some fancy ways (lookup Variants::Multiple
                         // { tag_encoding: TagEncoding})), the tag encoding type is
                         // necessary to know how to project into the union...
                         for variant in adt_def.variants() {
@@ -527,8 +531,9 @@ impl ProgramPoint {
                                     .skip_normalization();
 
                                 let rel = format!("{}.{}", variant_name, field_name);
-                                let child_name =
-                                    format!("{}::{}.{}", name, variant_name, field_name);
+                                let child_name = name
+                                    .project_variant(&variant_name)
+                                    .project_field(&field_name);
                                 self.add_var(
                                     tcx,
                                     child_name,
@@ -553,7 +558,7 @@ impl ProgramPoint {
     fn maybe_foreign_special_case_ty<'tcx>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
-        name: String,
+        name: VarName,
         adt_did: rustc_span::def_id::DefId,
         adt_generics: &[rustc_middle::ty::GenericArg<'tcx>],
         remaining_recursive_depth: Option<usize>,
@@ -571,19 +576,19 @@ impl ProgramPoint {
                 return;
             }
 
-            let len_name = format!("{}.length", name);
+            let len_name = name.project_field(FIELD_LENGTH);
             let mut var_decl =
-                VariableDecl::new(VarKind::Field("length".to_string()), DecType::Usize)
+                VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                     .with_enclosing_var(Some(name.clone()));
             if in_array {
                 var_decl = var_decl.with_array(Some(1));
             }
-            self.variables.insert(len_name, var_decl);
+            self.variables.insert(len_name.into_string(), var_decl);
 
             let elem_ty = adt_generics[0]
                 .as_type()
                 .expect("Found Vec<_> with no specified element type");
-            let elem_name = format!("{}[..]", name);
+            let elem_name = name.project_slice();
             self.add_var(
                 tcx,
                 elem_name,
@@ -609,7 +614,7 @@ impl ProgramPoint {
             let pointee_ty = adt_generics[0]
                 .as_type()
                 .expect("Found Box<_> with no specified pointee type");
-            let pointee = format!("*{}", name);
+            let pointee = name.project_deref();
 
             // FIXME: I don't think the varkind here should be Variable. Not sure what else
             // to do though, maybe keep it whatever it was previously?

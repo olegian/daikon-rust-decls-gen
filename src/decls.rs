@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use crate::{
-    callbacks,
+    VarName, callbacks,
     fields::{DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
     ppt::ProgramPoint,
 };
@@ -11,6 +11,9 @@ use crate::{
 pub struct DeclsFile {
     ppts: std::collections::BTreeMap<String, ProgramPoint>,
 }
+
+pub const RETURN_VAR_NAME: &'static str = "return";
+pub const FIELD_LENGTH: &'static str = "length";
 
 // Creates a string representation of the entire decls file, in the .decls format.
 impl<'a> std::fmt::Display for DeclsFile {
@@ -210,7 +213,7 @@ impl DeclsFile {
                     var_kind.expect("Found a variable decl with no var_kind specified."),
                     dec_type.expect("Found a variable decl with no dec_type specified."),
                 )
-                .with_enclosing_var(enclosing_var)
+                .with_enclosing_var(enclosing_var.map(VarName::new))
                 .with_array(array)
                 .with_constant(constant)
                 .with_comparability(comparability);
@@ -277,7 +280,7 @@ impl DeclsFile {
     pub fn var_name<'tcx>(tcx: rustc_middle::ty::TyCtxt<'tcx>, v: VarIdent) -> String {
         match v {
             VarIdent::Local(name) => name,
-            VarIdent::Return => "return".to_string(),
+            VarIdent::Return => RETURN_VAR_NAME.to_string(),
             VarIdent::Global(did) => {
                 let file = file_name_of(tcx, tcx.def_span(did));
                 let path = tcx.def_path_str(did);
@@ -287,10 +290,10 @@ impl DeclsFile {
     }
 
     /// get all program points (ENTER, EXIT, every EXITNN) for the given base ppt
-    /// name. 
+    /// name.
     pub fn ppts_for(&self, base_ppt_name: &str) -> Vec<&ProgramPoint> {
-        let lo = format!("{base_ppt_name}:::");   // can probably start with Enter? but eh
-        let hi = format!("{base_ppt_name}:::~");  // ~ --> 0x7E will sort after any digit/letter
+        let lo = format!("{base_ppt_name}:::"); // can probably start with Enter? but eh
+        let hi = format!("{base_ppt_name}:::~"); // ~ --> 0x7E will sort after any digit/letter
         self.ppts.range(lo..hi).map(|(_, p)| p).collect()
     }
 
@@ -316,7 +319,6 @@ impl DeclsFile {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&std::string::String, &mut ProgramPoint)> {
         self.ppts.iter_mut()
     }
-
 }
 
 /// Identifies a variable for DeclsFile::var_name. Use Global
@@ -329,10 +331,7 @@ pub enum VarIdent {
 }
 
 /// Absolute path of the source file containing span.
-pub(crate) fn file_name_of<'tcx>(
-    tcx: rustc_middle::ty::TyCtxt<'tcx>,
-    span: rustc_span::Span,
-) -> String {
+pub fn file_name_of<'tcx>(tcx: rustc_middle::ty::TyCtxt<'tcx>, span: rustc_span::Span) -> String {
     let rustc_span::FileName::Real(rfn) = tcx.sess.source_map().span_to_filename(span) else {
         panic!("Attempting to get file name of span without an associated real file.");
     };

@@ -17,4 +17,6 @@ mod globals;
 mod ppt;
 
 pub mod decls;
+pub mod vars;
 pub use decls::DeclsFile;
+pub use vars::VarName;
