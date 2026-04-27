@@ -252,7 +252,7 @@ impl DeclsFile {
 
     /// Writes the information contained within self to a .decls file, in the
     /// proper format.
-    pub fn write_to_file(self, file: &std::path::Path) -> std::io::Result<()> {
+    pub fn write_to_file(&self, file: &std::path::Path) -> std::io::Result<()> {
         let mut file =
             std::fs::File::create(file).expect("Unable to open output file for writing.");
         writeln!(file, "{}", self)
