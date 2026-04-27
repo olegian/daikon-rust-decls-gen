@@ -265,7 +265,7 @@ impl ProgramPoint {
                         src.deref_ptr(tcx)
                     }
 
-                    // the const_source is a more complicated fat pointer...
+                    // the const_source is a more complicated, fat pointer...
                     (
                         ConstSource::Indirect(_, _),
                         rustc_type_ir::TyKind::Slice(_) | rustc_type_ir::TyKind::Str,

@@ -204,7 +204,7 @@ impl<'tcx> ConstSource<'tcx> {
         };
 
         // from the data pointer, extract the allocation buffer that holds the actual data.
-        let (prov, _) = ptr.into_raw_parts();
+        let (prov, _) = ptr.prov_and_relative_offset();
         let data_alloc = match tcx.global_alloc(prov.alloc_id()) {
             rustc_middle::mir::interpret::GlobalAlloc::Memory(a) => a,
             _ => return None,

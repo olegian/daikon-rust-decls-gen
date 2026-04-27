@@ -53,6 +53,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
 
         // Create all ENTER/EXIT PPTs, adding all formals/returns to
         // each appropriate one.
+        // tcx.check_liveness(key)
         let items = tcx.hir_crate_items(());
         for ldid in items.definitions() {
             let node = tcx.hir_node_by_def_id(ldid);
