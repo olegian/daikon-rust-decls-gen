@@ -270,7 +270,8 @@ impl ProgramPoint {
                         ConstSource::Indirect(_, _),
                         rustc_type_ir::TyKind::Slice(_) | rustc_type_ir::TyKind::Str,
                     ) => {
-                        // ... in which case we have to create a type we can actually
+                        // ... in which case we have to create a type we can actually 
+                        // read and interpret values from
                         src.load_fat_ptr_to_slice(tcx)
                     }
                     _ => Some(src),
