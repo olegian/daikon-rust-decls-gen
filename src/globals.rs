@@ -90,6 +90,11 @@ impl<'a> Global {
 /// A handle to the const-evaluated value of a global, threaded alongside the
 /// recursive type-walk done in add_var so each leaf var-decl can be tagged with its
 /// compile-time bytes.
+/// 
+/// A ConstSource is built from a ConstValue, from the documentation:
+/// > A ConstValue can be either Scalar (a single Scalar, i.e., integer or thin pointer),
+/// > Slice (to represent byte slices and strings, as needed for pattern matching) or 
+/// > Indirect, which is used for anything else and refers to a virtual allocation
 #[derive(Clone, Copy)]
 pub enum ConstSource<'tcx> {
     /// A primitive scalar value (e.g. i32, but also thin pointers)
@@ -167,7 +172,8 @@ impl<'tcx> ConstSource<'tcx> {
         let Self::Scalar(rustc_middle::mir::interpret::Scalar::Ptr(ptr, _)) = self else {
             return None;
         };
-        let (prov, offset) = ptr.into_raw_parts();
+
+        let (prov, offset) = ptr.prov_and_relative_offset();
         let alloc_id = prov.alloc_id();
         match tcx.global_alloc(alloc_id) {
             rustc_middle::mir::interpret::GlobalAlloc::Memory(alloc) => {
@@ -182,7 +188,6 @@ impl<'tcx> ConstSource<'tcx> {
     /// This effectively extracts the const contents and the length, required
     /// to appropriately flatten out globals.
     pub fn load_fat_ptr_to_slice(&self, tcx: rustc_middle::ty::TyCtxt<'tcx>) -> Option<Self> {
-        // fat pointer is necessarily an Indirect allocation type
         let Self::Indirect(alloc, offset) = self else {
             return None;
         };
@@ -255,18 +260,21 @@ impl<'tcx> ConstSource<'tcx> {
     }
 }
 
+/// gets a string representation of a non-pointer scalar value,
+/// with respect to the intended data type. Booleans return "true"/"false",
+/// chars return "'c'", integers return "123".
 fn format_scalar(
     scalar: rustc_middle::mir::interpret::Scalar,
     ty: &rustc_middle::ty::Ty<'_>,
 ) -> String {
-    use rustc_type_ir::TyKind;
     match ty.kind() {
-        TyKind::Bool => match scalar_bits(scalar) {
+        rustc_type_ir::TyKind::Bool => match scalar_bits(scalar) {
             Some(0) => "false".to_string(),
             Some(_) => "true".to_string(),
             None => scalar.to_string(),
         },
-        TyKind::Char => scalar_bits(scalar)
+
+        rustc_type_ir::TyKind::Char => scalar_bits(scalar)
             .and_then(|b| char::from_u32(b as u32))
             .map(|c| format!("'{}'", c))
             .unwrap_or_else(|| scalar.to_string()),

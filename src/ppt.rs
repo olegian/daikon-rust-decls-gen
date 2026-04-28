@@ -163,7 +163,8 @@ impl ProgramPoint {
     ) {
         let Some(ppt_def_id) = self.local_def_id else {
             panic!(
-                "Cannot add globals to program points without knowledge of constant visibility. Adding globals requires building a decls file from source .rs files."
+                "Cannot add globals to program points without knowledge of constant visibility. \
+                 Adding globals requires building a decls file from source .rs files."
             )
         };
 
@@ -270,7 +271,7 @@ impl ProgramPoint {
                         ConstSource::Indirect(_, _),
                         rustc_type_ir::TyKind::Slice(_) | rustc_type_ir::TyKind::Str,
                     ) => {
-                        // ... in which case we have to create a type we can actually 
+                        // ... in which case we have to create a type we can actually
                         // read and interpret values from
                         src.load_fat_ptr_to_slice(tcx)
                     }
