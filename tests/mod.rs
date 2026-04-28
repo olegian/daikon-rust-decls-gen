@@ -77,3 +77,13 @@ fn globals_visibility() {
     let out_file = cwd.join("tests/globals_visibility/visibility.decls");
     decls.write_to_file(&out_file).unwrap();
 }
+
+#[test]
+fn traits() {
+    let cwd = std::env::current_dir().unwrap();
+    let test_file = cwd.join("tests/traits/main.rs");
+    let decls = decls_gen::DeclsFile::from_source_file(&test_file, Some(1));
+
+    let out_file = cwd.join("tests/traits/traits.decls");
+    decls.write_to_file(&out_file).unwrap();
+}
