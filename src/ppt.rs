@@ -359,13 +359,13 @@ impl ProgramPoint {
             // emit the [..] sequence.
             rustc_type_ir::TyKind::Array(inner, count_const) => {
                 let static_count = count_const.try_to_target_usize(tcx);
+                let len_name = name.project_field(FIELD_LENGTH);
+                let mut len_decl =
+                    VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
+                        .with_enclosing_var(Some(name.clone()));
+
                 if let (Some(src), Some(n)) = (const_source, static_count) {
-                    let len_name = name.project_field(FIELD_LENGTH);
-                    let mut len_decl =
-                        VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
-                            .with_enclosing_var(Some(name.clone()));
                     len_decl.set_constant(Some(n.to_string()));
-                    self.variables.insert(len_name.into_string(), len_decl);
 
                     for i in 0..n {
                         let child_src = src.project_field(tcx, ty, i as usize);
@@ -386,11 +386,6 @@ impl ProgramPoint {
                     if in_array {
                         return;
                     }
-                    let len_name = name.project_field(FIELD_LENGTH);
-                    let len_decl =
-                        VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
-                            .with_enclosing_var(Some(name.clone()));
-                    self.variables.insert(len_name.into_string(), len_decl);
 
                     let elem_name = name.project_slice();
                     self.add_var(
@@ -404,12 +399,21 @@ impl ProgramPoint {
                         None,
                     );
                 }
+
+                self.variables.insert(len_name.into_string(), len_decl);
             }
 
             // Slices. Handled very similarly to arrays, see above
             rustc_type_ir::TyKind::Slice(inner) => {
                 let slice_len = const_source.and_then(|s| s.slice_len());
+                let len_name = name.project_field(FIELD_LENGTH);
+                let mut len_decl =
+                    VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
+                        .with_enclosing_var(Some(name.clone()));
+
                 if let (Some(src), Some(n)) = (const_source, slice_len) {
+                    len_decl.set_constant(Some(n.to_string()));
+
                     for i in 0..n {
                         let child_src = src.project_slice_elem(tcx, *inner, i);
                         let rel = format!("[{}]", i);
@@ -429,11 +433,6 @@ impl ProgramPoint {
                     if in_array {
                         return;
                     }
-                    let len_name = name.project_field(FIELD_LENGTH);
-                    let len_decl =
-                        VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
-                            .with_enclosing_var(Some(name.clone()));
-                    self.variables.insert(len_name.into_string(), len_decl);
 
                     let elem_name = name.project_slice();
                     self.add_var(
@@ -447,6 +446,8 @@ impl ProgramPoint {
                         None,
                     );
                 }
+
+                self.variables.insert(len_name.into_string(), len_decl);
             }
 
             // Tuples emit a var decl per field.
