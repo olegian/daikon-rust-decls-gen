@@ -54,128 +54,54 @@ impl rustc_driver::Callbacks for ConstructDecls {
         // Create all ENTER/EXIT PPTs, adding all formals/returns to
         // each appropriate one.
         // tcx.check_liveness(key)
+        // for ldid in tcx.hir_body_owners() {
+            // let results = tcx.mir_borrowck(ldid).unwrap();
+            // let bck = rustc_borrowck::consumers::get_bodies_with_borrowck_facts(
+            //     tcx,
+            //     ldid,
+            //     rustc_borrowck::consumers::ConsumerOptions::PoloniusOutputFacts,
+            // );
+
+            // rustc_mir_dataflow::move_paths::
+            // rustc_middle::mir::
+        // }
+
+        // for ldid in tcx.hir_crate_items(()).definitions() {
+        //     match tcx.hir_node_by_def_id(ldid) {
+        //         rustc_hir::Node::Item(item) => match item.kind {
+        //             rustc_hir::ItemKind::Fn { sig, ident, generics, body, has_body } => {
+        //                 let bck = tcx.mir_borrowck(ldid).unwrap();
+        //                 println!("{:#?}", bck);
+        //             },
+        //             _ => {}
+        //         }
+        //         _ => {}
+        //     }
+        // }
+
+        // return rustc_driver::Compilation::Stop;
+
         let items = tcx.hir_crate_items(());
         for ldid in items.definitions() {
-            let node = tcx.hir_node_by_def_id(ldid);
-            match node {
-                rustc_hir::Node::Item(item) => {
-                    match item.kind {
-                        // Free functions
-                        rustc_hir::ItemKind::Fn { body, .. } => {
-                            let base_ppt_name = decls::DeclsFile::ppt_base_name(tcx, ldid);
-
-                            // extract relevant information regarding the function signature
-                            let body = tcx.hir_body(body);
-                            let param_names: Vec<String> = body
-                                .params
-                                .iter()
-                                .map(|param| {
-                                    param
-                                        .pat
-                                        .simple_ident()
-                                        .expect(
-                                            "Encountered input parameter with non-simple ident pat.",
-                                        )
-                                        .to_string()
-                                })
-                                .collect();
-                            let sig = tcx.fn_sig(ldid).instantiate_identity().skip_binder();
-                            let input_tys: Vec<_> = sig.inputs().iter().copied().collect();
-                            let return_ty = sig.output();
-
-                            // add enter, subexit, and exit ppts to the decls file
-                            let enter_name = self.add_enter_ppt(
-                                tcx,
-                                &base_ppt_name,
-                                ldid,
-                                &param_names,
-                                &input_tys,
-                            );
-                            self.add_exit_ppts(
-                                compiler,
-                                tcx,
-                                ldid,
-                                &base_ppt_name,
-                                enter_name,
-                                &param_names,
-                                &input_tys,
-                                return_ty,
-                            );
+            let rustc_hir::Node::Item(item) = tcx.hir_node_by_def_id(ldid) else {
+                continue;
+            };
+            match item.kind {
+                rustc_hir::ItemKind::Fn { body, .. } => self.process_fn(compiler, tcx, ldid, body),
+                rustc_hir::ItemKind::Impl(rustc_hir::Impl { items, .. }) => {
+                    for assoc_item in items {
+                        let method_ldid = assoc_item.owner_id.def_id;
+                        // FIXME: only handling assoc functions for now; assoc consts
+                        // may want to be surfaced in the decls file too.
+                        if let rustc_hir::ImplItemKind::Fn(_, body_id) =
+                            tcx.hir_expect_impl_item(method_ldid).kind
+                        {
+                            self.process_fn(compiler, tcx, method_ldid, body_id);
                         }
-
-                        // Associated functions (inherent and trait impls)
-                        rustc_hir::ItemKind::Impl(rustc_hir::Impl { self_ty, items, .. }) => {
-                            let rustc_hir::TyKind::Path(rustc_hir::QPath::Resolved(_, _)) =
-                                self_ty.kind
-                            else {
-                                panic!("Encountered impl block with non-Path kind self ty");
-                            };
-
-                            for assoc_item in items {
-                                let method_ldid = assoc_item.owner_id.def_id;
-                                let owner = tcx.hir_expect_impl_item(method_ldid);
-
-                                // FIXME:
-                                // for now, we only care about assoc functions. we probably
-                                // should also do something with assoc constants though?
-                                let rustc_hir::ImplItemKind::Fn(_sig, body_id) = owner.kind else {
-                                    continue;
-                                };
-
-                                // base_ppt_name is the fully qualified name, minus the :::PPT_TYPE
-                                let base_ppt_name =
-                                    decls::DeclsFile::ppt_base_name(tcx, method_ldid);
-
-                                // collect all names of input parameters
-                                let body = tcx.hir_body(body_id);
-                                let param_names: Vec<String> = body
-                                    .params
-                                    .iter()
-                                    .map(|param| {
-                                        param
-                                            .pat
-                                            .simple_ident()
-                                            .expect(
-                                                "Encountered input parameter with non-simple ident pat.",
-                                            )
-                                            .to_string()
-                                    })
-                                    .collect();
-
-                                // collect all input/output relevant types, combine with names.
-                                let sig =
-                                    tcx.fn_sig(method_ldid).instantiate_identity().skip_binder();
-                                let input_tys: Vec<_> = sig.inputs().iter().copied().collect();
-                                let return_ty = sig.output();
-
-                                let enter_name = self.add_enter_ppt(
-                                    tcx,
-                                    &base_ppt_name,
-                                    method_ldid,
-                                    &param_names,
-                                    &input_tys,
-                                );
-                                self.add_exit_ppts(
-                                    compiler,
-                                    tcx,
-                                    method_ldid,
-                                    &base_ppt_name,
-                                    enter_name,
-                                    &param_names,
-                                    &input_tys,
-                                    return_ty,
-                                );
-                            }
-                        }
-
-                        rustc_hir::ItemKind::Trait(..) => {}
-
-                        _ => {}
                     }
                 }
-
                 _ => {}
-            };
+            }
         }
 
         // discover and add all globals to each ppt for which they are in scope,
@@ -188,7 +114,7 @@ impl rustc_driver::Callbacks for ConstructDecls {
 
 impl ConstructDecls {
     /// Discovers all const/static items in the crate and adds a var-decl for
-    /// each one to every program point that has access to the const. 
+    /// each one to every program point that has access to the const.
     /// Must be called after every ppt's subexits have already been constructed,
     /// to avoid MIR stealing issues.
     fn add_globals<'tcx>(&mut self, tcx: rustc_middle::ty::TyCtxt<'tcx>) {
@@ -218,6 +144,56 @@ impl ConstructDecls {
         }
     }
 
+    /// Build all program points (ENTER, abstract EXIT, per-return-site EXITNN)
+    /// for one function body, identified by its def-id and HIR `BodyId`.
+    /// Used for both free fns and impl-method assoc fns; trait declarations
+    /// are skipped at the call site.
+    fn process_fn<'tcx>(
+        &mut self,
+        compiler: &rustc_interface::interface::Compiler,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+        body_id: rustc_hir::BodyId,
+    ) {
+        let base_ppt_name = decls::DeclsFile::ppt_base_name(tcx, ldid);
+
+        let param_names: Vec<String> = tcx
+            .hir_body(body_id)
+            .params
+            .iter()
+            .map(|param| {
+                param
+                    .pat
+                    .simple_ident()
+                    .expect("Encountered input parameter with non-simple ident pat.")
+                    .to_string()
+            })
+            .collect();
+
+        // Liberate late-bound regions in the fn signature so downstream
+        // queries (e.g. `type_is_copy_modulo_regions`) don't trip on
+        // escaping bound vars in types like `&mut Formatter<'_>`.
+        let sig = tcx.liberate_late_bound_regions(
+            ldid.to_def_id(),
+            tcx.fn_sig(ldid).instantiate_identity().skip_normalization(),
+        );
+        let input_tys: Vec<_> = sig.inputs().iter().copied().collect();
+        let return_ty = sig.output();
+
+        let enter_name =
+            self.add_enter_ppt(tcx, &base_ppt_name, ldid, &param_names, &input_tys);
+        self.add_exit_ppts(
+            compiler,
+            tcx,
+            ldid,
+            &base_ppt_name,
+            enter_name,
+            &param_names,
+            &input_tys,
+            return_ty,
+        );
+    }
+
     /// Adds the enter program point, given the provided input, to the decls file.
     fn add_enter_ppt<'tcx>(
         &mut self,
@@ -230,7 +206,11 @@ impl ConstructDecls {
         let (enter_name, enter_ppt) = ProgramPoint::enter(&base_ppt_name, local_def_id);
         let enter_ppt = enter_ppt.with_fn_inputs(
             tcx,
-            param_names.iter().cloned().zip(input_tys.iter()),
+            param_names
+                .iter()
+                .cloned()
+                .zip(input_tys.iter())
+                .map(|(n, t)| (n, t, false)),
             self.max_recursive_depth,
         );
 
@@ -251,75 +231,76 @@ impl ConstructDecls {
         input_tys: &[rustc_middle::ty::Ty<'tcx>],
         return_ty: rustc_middle::ty::Ty<'tcx>,
     ) {
-        // Add abstract EXIT point before handling any EXITNN's
+        // Tag each formal as `constant UNINITIALIZED` at exit iff the caller
+        // had to give up ownership to make the call. From the caller's frame:
+        //   - References (`&T`, `&mut T`) don't transfer ownership; the
+        //     caller still holds the underlying value after the call.
+        //   - Copy types are reproducible; the caller still has its copy.
+        //   - Everything else (owned non-Copy) is consumed by the callee --
+        //     moved into the return, dropped via Drop, or scope-ended -- and
+        //     so is no longer meaningfully observable to the caller.
+        // The classification is path-independent, so all subexits and the
+        // abstract EXIT share the same uninit set.
+        let typing_env = rustc_middle::ty::TypingEnv::post_analysis(tcx, ldid);
+        let uninit: Vec<bool> = input_tys
+            .iter()
+            .map(|ty| {
+                let is_ref = matches!(ty.kind(), rustc_type_ir::TyKind::Ref(..));
+                !is_ref && !tcx.type_is_copy_modulo_regions(typing_env, *ty)
+            })
+            .collect();
+        let inputs = || {
+            param_names
+                .iter()
+                .cloned()
+                .zip(input_tys.iter())
+                .zip(uninit.iter().copied())
+                .map(|((n, t), u)| (n, t, u))
+        };
+
+        // Abstract EXIT.
         let (exit_name, exit_ppt) = ProgramPoint::exit(base_ppt_name, ldid);
         let exit_ppt = exit_ppt
-            .with_fn_inputs(
-                tcx,
-                param_names.iter().cloned().zip(input_tys.iter()),
-                self.max_recursive_depth,
-            )
+            .with_fn_inputs(tcx, inputs(), self.max_recursive_depth)
             .with_fn_return(tcx, return_ty, self.max_recursive_depth)
             .with_parent(
-                // exit has parent tag refering to enter
                 enter_name,
                 ParentRelationType::EnterExit,
                 &mut self.next_parent_relation_id,
             );
-
         self.decls.add_program_point(exit_name.clone(), exit_ppt);
 
-        // Add EXITNN's:
-        // get mir representation of the function of interest
-        // remember that mir is a CFG, which means it should have basic blocks
-        // which jump out of the current function. these are our "return locations".
-        let mir = tcx.mir_built(ldid).borrow();
-        let source_map = compiler.sess.source_map();
-
-        let mut spans: Vec<rustc_span::Span> = Vec::new();
-        for bb in mir.basic_blocks.iter() {
-            // iterate through all statements of all basic blocks, looking for ...
-            for stmt in &bb.statements {
-                // ... places where we directly assign a value to the return place,
-                // essentially %rax. These assignments happen right before all returns,
-                // including for void functions (at least in the initially built mir,
-                // before ANY OTHER OPTIMIZATIONS OCCUR -- that's why it's important
-                // that we are using the mir_built query as opposed to any other one).
-                // based on manual inspection using the `rustc -Z dump-mir` command),
-                // so hopefully this doesn't change in the future?
-                if let rustc_middle::mir::StatementKind::Assign(ref place_rvalue) = stmt.kind {
-                    if place_rvalue.0.local == rustc_middle::mir::RETURN_PLACE {
+        // Walk MIR to discover return-sites for subexits, marked by assignment
+        // to the return place (right before every return in mir_built, including
+        // void/implicit ones) and Calls whose destination is the return
+        // place. mir_built is a steal-query, so we collect spans and drop
+        // the borrow before constructing further ppts.
+        // FIXME: TailCall may also belong here; needs a fixture + MIR dump.
+        let lines: Vec<u64> = {
+            let mir = tcx.mir_built(ldid).borrow();
+            let source_map = compiler.sess.source_map();
+            let mut spans: Vec<rustc_span::Span> = Vec::new();
+            for bb in mir.basic_blocks.iter() {
+                for stmt in &bb.statements {
+                    if let rustc_middle::mir::StatementKind::Assign(ref place_rvalue) = stmt.kind
+                        && place_rvalue.0.local == rustc_middle::mir::RETURN_PLACE
+                    {
                         spans.push(stmt.source_info.span);
                     }
                 }
-            }
-
-            // ... invocations of functions that write to the return place.
-            // note that TerminatorKind::Return is unnecessary for us, that would've been
-            // caught by the assignment that came before it.
-            if let rustc_middle::mir::TerminatorKind::Call { destination, .. } =
-                &bb.terminator().kind
-            {
-                if destination.local == rustc_middle::mir::RETURN_PLACE {
+                if let rustc_middle::mir::TerminatorKind::Call { destination, .. } =
+                    &bb.terminator().kind
+                    && destination.local == rustc_middle::mir::RETURN_PLACE
+                {
                     spans.push(bb.terminator().source_info.span);
                 }
             }
+            spans
+                .iter()
+                .map(|s| source_map.lookup_char_pos(s.source_callsite().lo()).line as u64)
+                .collect()
+        };
 
-            // ... might also have to do something with TailCall? looks like the result of a TailCall
-            // is always written to _0, which means it's a return point? write out
-            // a tail-call test and dump out it's MIR to find out whats going on.
-        }
-
-        // Resolve each span to a source line via the source map
-        let lines: Vec<u64> = spans
-            .iter()
-            .map(|s| source_map.lookup_char_pos(s.source_callsite().lo()).line as u64)
-            .collect();
-
-        // silly collision detection, if we ever encounter a duplicate line number, just bump up
-        // until we find an id we are yet to use.
-        // this probably makes the output slightly harder to understand, but should meet spec
-        // requirements, keeping subexits with distinct ids.
         let mut assigned = std::collections::HashSet::new();
         for line in lines {
             let mut candidate = line;
@@ -328,24 +309,18 @@ impl ConstructDecls {
             }
             assigned.insert(candidate);
 
-            // create a subexit for each line number
-            let (subexit_name, subexit_ppt) = ProgramPoint::subexit(base_ppt_name, ldid, candidate);
+            let (subexit_name, subexit_ppt) =
+                ProgramPoint::subexit(base_ppt_name, ldid, candidate);
             let subexit_ppt = subexit_ppt
-                .with_fn_inputs(
-                    tcx,
-                    param_names.iter().cloned().zip(input_tys.iter()),
-                    self.max_recursive_depth,
-                )
+                .with_fn_inputs(tcx, inputs(), self.max_recursive_depth)
                 .with_fn_return(tcx, return_ty, self.max_recursive_depth)
                 .with_parent(
-                    // subexits get parent tag pointing to abstract exit.
                     exit_name.clone(),
                     ParentRelationType::ExitExitNN,
                     &mut self.next_parent_relation_id,
                 );
 
-            self.decls
-                .add_program_point(subexit_name.clone(), subexit_ppt);
+            self.decls.add_program_point(subexit_name, subexit_ppt);
         }
     }
 }

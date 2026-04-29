@@ -10,6 +10,8 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_span;
 extern crate rustc_type_ir;
+extern crate rustc_borrowck;
+extern crate rustc_mir_dataflow;
 
 mod callbacks;
 mod fields;

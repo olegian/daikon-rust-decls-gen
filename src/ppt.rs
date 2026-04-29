@@ -117,6 +117,7 @@ impl ProgramPoint {
             max_recursive_depth,
             false,
             None,
+            false,
         );
 
         self
@@ -124,17 +125,20 @@ impl ProgramPoint {
 
     /// Add all function inputs (formals) to this program point.
     ///
-    /// `inputs` is an iterator that nets items (var_name: String, var_type: mir::Ty).
+    /// `inputs` yields items (var_name, var_type, is_uninit). When `is_uninit`
+    /// is true, the formal (and every recursively-expanded sub-variable) is
+    /// tagged with `constant UNINITIALIZED`, signaling that the value has
+    /// been dropped/moved-out by this program point.
     pub fn with_fn_inputs<'a, 'b: 'a>(
         mut self,
         tcx: rustc_middle::ty::TyCtxt<'b>,
         // i really think there is a better way to represent this, but
         // because we are pulling names off the HIR body and types off the MIR,
         // i'm not sure if there is a unified existing representation for it.
-        inputs: impl Iterator<Item = (String, &'a rustc_middle::ty::Ty<'b>)>,
+        inputs: impl Iterator<Item = (String, &'a rustc_middle::ty::Ty<'b>, bool)>,
         max_recursive_depth: Option<usize>,
     ) -> Self {
-        for (name, ty) in inputs {
+        for (name, ty, is_uninit) in inputs {
             self.add_var(
                 tcx,
                 VarName::new(name),
@@ -144,6 +148,7 @@ impl ProgramPoint {
                 max_recursive_depth,
                 false,
                 None,
+                is_uninit,
             );
         }
 
@@ -210,6 +215,7 @@ impl ProgramPoint {
                     max_recursive_depth,
                     false,
                     const_source,
+                    false,
                 )
             }
         }
@@ -229,6 +235,9 @@ impl ProgramPoint {
     ///    the variable. each leaf is tagged with its constant value.
     ///    further, when Some, arrays/slices are expanded into per-element
     ///    var-decls (p[0], p[1], ...) instead of the collapsed [..] sequence.
+    /// `is_uninit`, when true, tags every emitted var-decl (this one and every
+    ///    recursively expanded sub-variable) with `constant UNINITIALIZED`. Used
+    ///    for formals that have been dropped/moved-out by this program point.
     fn add_var<'b>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'b>,
@@ -239,6 +248,7 @@ impl ProgramPoint {
         remaining_recursive_depth: Option<usize>,
         in_array: bool,
         const_source: Option<ConstSource<'b>>,
+        is_uninit: bool,
     ) {
         // stop expanding vars if we have hit the max depth.
         if let Some(remaining_depth) = remaining_recursive_depth
@@ -293,12 +303,19 @@ impl ProgramPoint {
             var_decl = var_decl.with_array(Some(1));
         }
 
+        // Uninit formals get a UNINITIALIZED tag on every emitted var-decl,
+        // overriding any const-source tagging (in practice const_source is
+        // always None for uninit formals anyway).
+        if is_uninit {
+            var_decl = var_decl.with_constant(Some("UNINITIALIZED".to_string()));
+        }
+
         // If a const source is available, attach a constant tag for this decl.
         // Primitives get their actual value
         // &str gets a decoded string;
         // FIXME: compound types get a TEMP_PTR placeholder for now, but are then
         // recursively expanded
-        if let Some(src) = &const_source {
+        if !is_uninit && let Some(src) = &const_source {
             let constant = match ty.kind() {
                 rustc_type_ir::TyKind::Bool
                 | rustc_type_ir::TyKind::Char
@@ -364,6 +381,9 @@ impl ProgramPoint {
                 let mut len_decl =
                     VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                         .with_enclosing_var(Some(name.clone()));
+                if is_uninit {
+                    len_decl.set_constant(Some("UNINITIALIZED".to_string()));
+                }
 
                 if let (Some(src), Some(n)) = (const_source, static_count) {
                     len_decl.set_constant(Some(n.to_string()));
@@ -381,6 +401,7 @@ impl ProgramPoint {
                             remaining_recursive_depth.map(|r| r - 1),
                             in_array,
                             child_src,
+                            is_uninit,
                         );
                     }
                 } else {
@@ -398,6 +419,7 @@ impl ProgramPoint {
                         remaining_recursive_depth.map(|r| r - 1),
                         in_array,
                         None,
+                        is_uninit,
                     );
                 }
 
@@ -411,6 +433,9 @@ impl ProgramPoint {
                 let mut len_decl =
                     VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                         .with_enclosing_var(Some(name.clone()));
+                if is_uninit {
+                    len_decl.set_constant(Some("UNINITIALIZED".to_string()));
+                }
 
                 if let (Some(src), Some(n)) = (const_source, slice_len) {
                     len_decl.set_constant(Some(n.to_string()));
@@ -428,6 +453,7 @@ impl ProgramPoint {
                             remaining_recursive_depth.map(|r| r - 1),
                             in_array,
                             child_src,
+                            is_uninit,
                         );
                     }
                 } else {
@@ -445,6 +471,7 @@ impl ProgramPoint {
                         remaining_recursive_depth.map(|r| r - 1),
                         in_array,
                         None,
+                        is_uninit,
                     );
                 }
 
@@ -466,6 +493,7 @@ impl ProgramPoint {
                         remaining_recursive_depth.map(|remaining| remaining - 1),
                         in_array,
                         child_src,
+                        is_uninit,
                     );
                 }
             }
@@ -485,6 +513,7 @@ impl ProgramPoint {
                         &generics[..],
                         remaining_recursive_depth,
                         in_array,
+                        is_uninit,
                     );
                     return;
                 }
@@ -510,6 +539,7 @@ impl ProgramPoint {
                                 remaining_recursive_depth.map(|remaining| remaining - 1),
                                 in_array,
                                 child_src,
+                                is_uninit,
                             );
                         }
                     }
@@ -546,6 +576,7 @@ impl ProgramPoint {
                                     remaining_recursive_depth.map(|remaining| remaining - 1),
                                     in_array,
                                     None,
+                                    is_uninit,
                                 );
                             }
                         }
@@ -566,6 +597,7 @@ impl ProgramPoint {
         adt_generics: &[rustc_middle::ty::GenericArg<'tcx>],
         remaining_recursive_depth: Option<usize>,
         in_array: bool,
+        is_uninit: bool,
     ) {
         let lang_items = tcx.lang_items();
         if tcx.is_diagnostic_item(rustc_span::symbol::sym::Vec, adt_did) {
@@ -586,6 +618,9 @@ impl ProgramPoint {
             if in_array {
                 var_decl = var_decl.with_array(Some(1));
             }
+            if is_uninit {
+                var_decl = var_decl.with_constant(Some("UNINITIALIZED".to_string()));
+            }
             self.variables.insert(len_name.into_string(), var_decl);
 
             let elem_ty = adt_generics[0]
@@ -601,6 +636,7 @@ impl ProgramPoint {
                 remaining_recursive_depth.map(|remaining| remaining - 1),
                 in_array,
                 None,
+                is_uninit,
             );
         } else if adt_did
             == lang_items
@@ -630,6 +666,7 @@ impl ProgramPoint {
                 remaining_recursive_depth.map(|remain| remain - 1),
                 in_array,
                 None,
+                is_uninit,
             );
         } else if adt_did
             == lang_items
