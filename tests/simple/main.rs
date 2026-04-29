@@ -6,6 +6,10 @@ impl<T> MyStruct<T> {
     fn bar(&self, param: T) {
         println!("This function is inside an impl");
     }
+
+    fn accepts_self(self, param: u32) -> Self {
+        self
+    }
 }
 
 enum MyEnum {
