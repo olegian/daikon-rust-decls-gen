@@ -1,5 +1,5 @@
 use crate::{
-    decls::{FIELD_LENGTH, RETURN_VAR_NAME},
+    decls::{VarIdent, DeclsFile, FIELD_LENGTH, RETURN_VAR_NAME},
     fields::{Constant, DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
     globals::{ConstSource, Global},
     vars::{VarName, escape_str},
@@ -76,9 +76,9 @@ impl ProgramPoint {
     pub fn var_decl_lookup<'tcx>(
         &self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
-        v: crate::decls::VarIdent,
+        v: VarIdent,
     ) -> Option<&VariableDecl> {
-        let name = crate::decls::DeclsFile::var_name(tcx, v);
+        let name = DeclsFile::var_name(tcx, v);
         self.var_decl(name)
     }
 
@@ -86,9 +86,9 @@ impl ProgramPoint {
     pub fn var_decl_lookup_mut<'tcx>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
-        v: crate::decls::VarIdent,
+        v: VarIdent,
     ) -> Option<&mut VariableDecl> {
-        let name = crate::decls::DeclsFile::var_name(tcx, v);
+        let name = DeclsFile::var_name(tcx, v);
         self.var_decl_mut(name)
     }
 
