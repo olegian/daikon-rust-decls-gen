@@ -19,7 +19,7 @@ mod globals;
 mod ppt;
 
 pub mod decls;
-pub mod vars;
+mod vars;
 pub use decls::{DeclsFile, VarIdent};
 pub use fields::{Constant, VariableDecl};
 pub use ppt::ProgramPoint;

@@ -73,22 +73,30 @@ impl ProgramPoint {
     /// Look up the `VariableDecl` for a parameter (`VarIdent::Local`), the
     /// return value (`VarIdent::Return`), or a global / `const` / `static`
     /// item (`VarIdent::Global(did)`) reachable from this program point.
-    pub fn var_decl<'tcx>(
+    pub fn var_decl_lookup<'tcx>(
         &self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         v: crate::decls::VarIdent,
     ) -> Option<&VariableDecl> {
         let name = crate::decls::DeclsFile::var_name(tcx, v);
-        self.variables.get(&escape_str(name))
+        self.var_decl(name)
     }
 
     /// See `var_decl`.
-    pub fn var_decl_mut<'tcx>(
+    pub fn var_decl_lookup_mut<'tcx>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         v: crate::decls::VarIdent,
     ) -> Option<&mut VariableDecl> {
         let name = crate::decls::DeclsFile::var_name(tcx, v);
+        self.var_decl_mut(name)
+    }
+
+    pub fn var_decl(&self, name: String) -> Option<&VariableDecl> {
+        self.variables.get(&escape_str(name))
+    }
+
+    pub fn var_decl_mut(&mut self, name: String) -> Option<&mut VariableDecl> {
         self.variables.get_mut(&escape_str(name))
     }
 
