@@ -305,8 +305,66 @@ impl DeclsFile {
     }
 
     /// Fetch the ENTER program point for the function/method identified by
-    /// `ldid`.
+    /// base program point name.
     pub fn enter_ppt<'tcx>(
+        &self,
+        base_ppt_name: &str,
+    ) -> Option<&ProgramPoint> {
+        self.ppts.get(&format!("{}:::ENTER", base_ppt_name))
+    }
+
+    /// See `enter_ppt`
+    pub fn enter_ppt_mut<'tcx>(
+        &mut self,
+        base_ppt_name: &str,
+    ) -> Option<&mut ProgramPoint> {
+        self.ppts.get_mut(&format!("{}:::ENTER", base_ppt_name))
+    }
+
+
+    /// Fetch the EXIT program point for the function/method identified by
+    /// base program point name.
+    pub fn exit_ppt<'tcx>(
+        &self,
+        base_ppt_name: &str,
+    ) -> Option<&ProgramPoint> {
+        self.ppts.get(&format!("{}:::EXIT", base_ppt_name))
+    }
+
+    /// See `exit_ppt`.
+    pub fn exit_ppt_mut<'tcx>(
+        &mut self,
+        base_ppt_name: &str,
+    ) -> Option<&mut ProgramPoint> {
+        self.ppts.get_mut(&format!("{}:::EXIT", base_ppt_name))
+    }
+
+
+    /// Fetch the EXIT{id} (subexit) program point for the function/method
+    /// identified by base_ppt_name. The `id` matches the numeric suffix Daikon uses
+    /// to distinguish multiple return points within the same function.
+    /// Use `ppts_for` instead if you want every subexit at once.
+    pub fn exitnn_ppt<'tcx>(
+        &self,
+        base_ppt_name: &str,
+        id: u64,
+    ) -> Option<&ProgramPoint> {
+        self.ppts.get(&format!("{}:::EXIT{id}", base_ppt_name))
+    }
+
+    /// See `exitnn_ppt`.
+    pub fn exitnn_ppt_mut<'tcx>(
+        &mut self,
+        base_ppt_name: &str,
+        id: u64,
+    ) -> Option<&mut ProgramPoint> {
+        self.ppts.get_mut(&format!("{}:::EXIT{id}", base_ppt_name))
+    }
+
+
+    /// Fetch the ENTER program point for the function/method identified by
+    /// `ldid`.
+    pub fn enter_ppt_by_id<'tcx>(
         &self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         ldid: rustc_hir::def_id::LocalDefId,
@@ -315,9 +373,8 @@ impl DeclsFile {
         self.ppts.get(&format!("{base}:::ENTER"))
     }
 
-    /// Fetch the ENTER program point for the function/method identified by
-    /// `ldid`.
-    pub fn enter_ppt_mut<'tcx>(
+    /// See `enter_ppt_by_id`
+    pub fn enter_ppt_by_id_mut<'tcx>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         ldid: rustc_hir::def_id::LocalDefId,
@@ -329,7 +386,7 @@ impl DeclsFile {
 
     /// Fetch the EXIT program point for the function/method identified by
     /// `ldid`.
-    pub fn exit_ppt<'tcx>(
+    pub fn exit_ppt_by_id<'tcx>(
         &self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         ldid: rustc_hir::def_id::LocalDefId,
@@ -338,8 +395,8 @@ impl DeclsFile {
         self.ppts.get(&format!("{base}:::EXIT"))
     }
 
-    /// See `exit_ppt`.
-    pub fn exit_ppt_mut<'tcx>(
+    /// See `exit_ppt_by_id`.
+    pub fn exit_ppt_by_id_mut<'tcx>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         ldid: rustc_hir::def_id::LocalDefId,
@@ -353,7 +410,7 @@ impl DeclsFile {
     /// identified by `ldid`. The `id` matches the numeric suffix Daikon uses
     /// to distinguish multiple return points within the same function.
     /// Use `ppts_for` instead if you want every subexit at once.
-    pub fn exitnn_ppt<'tcx>(
+    pub fn exitnn_ppt_by_id<'tcx>(
         &self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         ldid: rustc_hir::def_id::LocalDefId,
@@ -363,8 +420,8 @@ impl DeclsFile {
         self.ppts.get(&format!("{base}:::EXIT{id}"))
     }
 
-    /// See `exitnn_ppt`.
-    pub fn exitnn_ppt_mut<'tcx>(
+    /// See `exitnn_ppt_by_id`.
+    pub fn exitnn_ppt_mut_by_id<'tcx>(
         &mut self,
         tcx: rustc_middle::ty::TyCtxt<'tcx>,
         ldid: rustc_hir::def_id::LocalDefId,
