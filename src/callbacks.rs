@@ -48,51 +48,19 @@ impl rustc_driver::Callbacks for ConstructDecls {
         // println!("{:#?}", res);
         // return rustc_driver::Compilation::Stop;
 
-        // find crate that contains generic template?
-        // Instance::upstream_monomorphization(&self, tcx)
-
-        // Create all ENTER/EXIT PPTs, adding all formals/returns to
-        // each appropriate one.
-        // tcx.check_liveness(key)
-        // for ldid in tcx.hir_body_owners() {
-            // let results = tcx.mir_borrowck(ldid).unwrap();
-            // let bck = rustc_borrowck::consumers::get_bodies_with_borrowck_facts(
-            //     tcx,
-            //     ldid,
-            //     rustc_borrowck::consumers::ConsumerOptions::PoloniusOutputFacts,
-            // );
-
-            // rustc_mir_dataflow::move_paths::
-            // rustc_middle::mir::
-        // }
-
-        // for ldid in tcx.hir_crate_items(()).definitions() {
-        //     match tcx.hir_node_by_def_id(ldid) {
-        //         rustc_hir::Node::Item(item) => match item.kind {
-        //             rustc_hir::ItemKind::Fn { sig, ident, generics, body, has_body } => {
-        //                 let bck = tcx.mir_borrowck(ldid).unwrap();
-        //                 println!("{:#?}", bck);
-        //             },
-        //             _ => {}
-        //         }
-        //         _ => {}
-        //     }
-        // }
-
-        // return rustc_driver::Compilation::Stop;
-
         let items = tcx.hir_crate_items(());
         for ldid in items.definitions() {
             let rustc_hir::Node::Item(item) = tcx.hir_node_by_def_id(ldid) else {
+                // we only care about functions / methods, so ignore all other non-
+                // item nodes.
                 continue;
             };
+
             match item.kind {
                 rustc_hir::ItemKind::Fn { body, .. } => self.process_fn(compiler, tcx, ldid, body),
                 rustc_hir::ItemKind::Impl(rustc_hir::Impl { items, .. }) => {
                     for assoc_item in items {
                         let method_ldid = assoc_item.owner_id.def_id;
-                        // FIXME: only handling assoc functions for now; assoc consts
-                        // may want to be surfaced in the decls file too.
                         if let rustc_hir::ImplItemKind::Fn(_, body_id) =
                             tcx.hir_expect_impl_item(method_ldid).kind
                         {
@@ -146,8 +114,8 @@ impl ConstructDecls {
 
     /// Build all program points (ENTER, abstract EXIT, per-return-site EXITNN)
     /// for one function body, identified by its def-id and HIR `BodyId`.
-    /// Used for both free fns and impl-method assoc fns; trait declarations
-    /// are skipped at the call site.
+    /// Used for both free fns and impl-method assoc fns.
+    /// FIXME: trait declarations are skipped at the call site.
     fn process_fn<'tcx>(
         &mut self,
         compiler: &rustc_interface::interface::Compiler,
@@ -170,18 +138,21 @@ impl ConstructDecls {
             })
             .collect();
 
-        // Liberate late-bound regions in the fn signature so downstream
-        // queries (e.g. `type_is_copy_modulo_regions`) don't trip on
-        // escaping bound vars in types like `&mut Formatter<'_>`.
+        // Liberate late-bound regions in the fn signature (lifetimes such as
+        // ones introduced by for<'a> syntax which are locally scoped) into
+        // "free" lifetimes (i.e. make them act like regular ones). allows downstream
+        // queries (type_is_copy_modulo_regions) to not fail on
+        // escaping bound lifetimes in types like `&mut Formatter<'_>`.
         let sig = tcx.liberate_late_bound_regions(
             ldid.to_def_id(),
             tcx.fn_sig(ldid).instantiate_identity().skip_normalization(),
         );
+
         let input_tys: Vec<_> = sig.inputs().iter().copied().collect();
         let return_ty = sig.output();
 
-        let enter_name =
-            self.add_enter_ppt(tcx, &base_ppt_name, ldid, &param_names, &input_tys);
+        // add all enter/exit/subexit ppts!
+        let enter_name = self.add_enter_ppt(tcx, &base_ppt_name, ldid, &param_names, &input_tys);
         self.add_exit_ppts(
             compiler,
             tcx,
@@ -245,10 +216,12 @@ impl ConstructDecls {
         let uninit: Vec<bool> = input_tys
             .iter()
             .map(|ty| {
+                // inputs that are NOT references and NOT copy will become UNINIT
                 let is_ref = matches!(ty.kind(), rustc_type_ir::TyKind::Ref(..));
                 !is_ref && !tcx.type_is_copy_modulo_regions(typing_env, *ty)
             })
             .collect();
+
         let inputs = || {
             param_names
                 .iter()
@@ -301,6 +274,7 @@ impl ConstructDecls {
                 .collect()
         };
 
+        // silly little collision avoidance for subexits points.
         let mut assigned = std::collections::HashSet::new();
         for line in lines {
             let mut candidate = line;
@@ -309,8 +283,7 @@ impl ConstructDecls {
             }
             assigned.insert(candidate);
 
-            let (subexit_name, subexit_ppt) =
-                ProgramPoint::subexit(base_ppt_name, ldid, candidate);
+            let (subexit_name, subexit_ppt) = ProgramPoint::subexit(base_ppt_name, ldid, candidate);
             let subexit_ppt = subexit_ppt
                 .with_fn_inputs(tcx, inputs(), self.max_recursive_depth)
                 .with_fn_return(tcx, return_ty, self.max_recursive_depth)

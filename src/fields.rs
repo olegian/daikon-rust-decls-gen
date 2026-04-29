@@ -224,6 +224,51 @@ impl std::convert::From<&str> for DecType {
     }
 }
 
+/// The `constant` tag attached to a variable declaration.
+///
+/// `None` means no `constant` line is emitted.
+/// `Uninit` for values that have been dropped by the time execution reaches
+///   this program point.
+/// `Boolean(repr)` is `"true"` or `"false"`.
+/// `String(repr)` is either a quoted string literal ("\"hello\"") or
+///   a single-quoted char literal (e.g. "'c'")
+/// `Numeric(repr)` covers integer/float scalar values and array/slice lengths.
+#[derive(Debug)]
+pub enum Constant {
+    None,
+    Uninit,
+    Boolean(String),
+    String(String),
+    Numeric(String),
+}
+
+impl Constant {
+    pub fn is_some(&self) -> bool {
+        !matches!(self, Constant::None)
+    }
+}
+
+impl std::fmt::Display for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Constant::None => Ok(()),
+            Constant::Uninit => f.write_str("UNINITIALIZED"),
+            Constant::Boolean(s) | Constant::String(s) | Constant::Numeric(s) => f.write_str(s),
+        }
+    }
+}
+
+impl std::convert::From<&str> for Constant {
+    fn from(value: &str) -> Self {
+        match value {
+            "UNINITIALIZED" => Constant::Uninit,
+            "true" | "false" => Constant::Boolean(value.to_string()),
+            s if s.starts_with('"') || s.starts_with('\'') => Constant::String(s.to_string()),
+            s => Constant::Numeric(s.to_string()),
+        }
+    }
+}
+
 /// A single variable declaration, as specified by section A.3.3 of the Daikon
 /// Developer Documentation.
 #[derive(Debug)]
@@ -232,7 +277,7 @@ pub struct VariableDecl {
     dec_type: DecType,
     enclosing_var: Option<VarName>,
     array: Option<u8>,
-    constant: Option<String>,
+    constant: Constant,
     comparability: Option<i64>,
 }
 
@@ -244,7 +289,7 @@ impl VariableDecl {
             enclosing_var: None,
             array: None,
             comparability: None,
-            constant: None,
+            constant: Constant::None,
         }
     }
 
@@ -258,18 +303,39 @@ impl VariableDecl {
         self
     }
 
-    pub fn with_constant(mut self, value_repr: Option<String>) -> Self {
-        self.constant = value_repr;
+    pub fn with_constant(mut self, constant: Constant) -> Self {
+        self.constant = constant;
         self
     }
 
-    pub fn set_constant(&mut self, value_repr: Option<String>) {
-        self.constant = value_repr;
+    pub fn set_constant(&mut self, constant: Constant) {
+        self.constant = constant;
     }
 
     pub fn with_comparability(mut self, comp: Option<i64>) -> Self {
         self.comparability = comp;
         self
+    }
+
+    pub fn set_comparability(&mut self, comp: Option<i64>) {
+        self.comparability = comp;
+    }
+
+    /// Returns true iff this declaration carries a `constant` tag of any kind.
+    pub fn is_constant(&self) -> bool {
+        self.constant.is_some()
+    }
+
+    /// Returns true iff this declaration's `constant` tag is the
+    /// `UNINITIALIZED`, i.e. the value has been moved-out / dropped
+    /// by the time execution reaches the enclosing program point.
+    pub fn is_uninit(&self) -> bool {
+        matches!(self.constant, Constant::Uninit)
+    }
+
+    /// Get the constant tag associated with this variable.
+    pub fn constant(&self) -> &Constant {
+        &self.constant
     }
 }
 
@@ -284,8 +350,8 @@ impl std::fmt::Display for VariableDecl {
         if let Some(dim) = self.array {
             writeln!(f, "  array {}", dim)?;
         }
-        if let Some(constant) = &self.constant {
-            writeln!(f, "  constant {}", constant)?;
+        if self.constant.is_some() {
+            writeln!(f, "  constant {}", self.constant)?;
         }
         writeln!(f, "  comparability {}", self.comparability.unwrap_or(-1))?;
         Ok(())

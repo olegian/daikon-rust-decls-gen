@@ -1,6 +1,6 @@
 use crate::{
     decls::{FIELD_LENGTH, RETURN_VAR_NAME},
-    fields::{DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
+    fields::{Constant, DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
     globals::{ConstSource, Global},
     vars::{VarName, escape_str},
 };
@@ -70,12 +70,26 @@ impl ProgramPoint {
         }
     }
 
-    pub fn get_var(&self, qualified_var_path: &str) -> Option<&VariableDecl> {
-        self.variables.get(qualified_var_path)
+    /// Look up the `VariableDecl` for a parameter (`VarIdent::Local`), the
+    /// return value (`VarIdent::Return`), or a global / `const` / `static`
+    /// item (`VarIdent::Global(did)`) reachable from this program point.
+    pub fn var_decl<'tcx>(
+        &self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        v: crate::decls::VarIdent,
+    ) -> Option<&VariableDecl> {
+        let name = crate::decls::DeclsFile::var_name(tcx, v);
+        self.variables.get(&escape_str(name))
     }
 
-    pub fn get_var_mut(&mut self, qualified_var_path: &str) -> Option<&mut VariableDecl> {
-        self.variables.get_mut(qualified_var_path)
+    /// See `var_decl`.
+    pub fn var_decl_mut<'tcx>(
+        &mut self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        v: crate::decls::VarIdent,
+    ) -> Option<&mut VariableDecl> {
+        let name = crate::decls::DeclsFile::var_name(tcx, v);
+        self.variables.get_mut(&escape_str(name))
     }
 
     /// Register the program point with name `parent_ppt` as a parent of
@@ -307,7 +321,7 @@ impl ProgramPoint {
         // overriding any const-source tagging (in practice const_source is
         // always None for uninit formals anyway).
         if is_uninit {
-            var_decl = var_decl.with_constant(Some("UNINITIALIZED".to_string()));
+            var_decl = var_decl.with_constant(Constant::Uninit);
         }
 
         // If a const source is available, attach a constant tag for this decl.
@@ -317,20 +331,37 @@ impl ProgramPoint {
         // recursively expanded
         if !is_uninit && let Some(src) = &const_source {
             let constant = match ty.kind() {
-                rustc_type_ir::TyKind::Bool
-                | rustc_type_ir::TyKind::Char
-                | rustc_type_ir::TyKind::Int(_)
+                rustc_type_ir::TyKind::Bool => src
+                    .read_leaf(tcx, ty)
+                    .map(Constant::Boolean)
+                    .unwrap_or(Constant::None),
+                rustc_type_ir::TyKind::Char => src
+                    .read_leaf(tcx, ty)
+                    .map(Constant::String)
+                    .unwrap_or(Constant::None),
+                rustc_type_ir::TyKind::Int(_)
                 | rustc_type_ir::TyKind::Uint(_)
-                | rustc_type_ir::TyKind::Float(_) => src.read_leaf(tcx, ty),
-                rustc_type_ir::TyKind::Str => src.read_str(),
+                | rustc_type_ir::TyKind::Float(_) => src
+                    .read_leaf(tcx, ty)
+                    .map(Constant::Numeric)
+                    .unwrap_or(Constant::None),
+                rustc_type_ir::TyKind::Str => {
+                    src.read_str().map(Constant::String).unwrap_or(Constant::None)
+                }
                 // String::new() is the only const fn String constructor,
                 // so any const-evaluatable String is the empty string.
                 // in the future, if that ever changes, this will need to as well.
-                _ if matches!(dec_type, DecType::String) => Some("\"\"".to_string()),
+                _ if matches!(dec_type, DecType::String) => Constant::String("\"\"".to_string()),
                 _ if matches!(dec_type, DecType::Compound(_)) => {
-                    Some("TEMPORARY_PTR_PLACEHOLDER".to_string())
+                    // 4/28/26 --> we decided that rep-type hashcode vars, even
+                    // if they are constant, should not get a constant tag.
+                    // This could still be wrong. consts don't have a single address
+                    // they are inlined and therefore can be anywhere at each usage.
+                    // statics do have a fixed address for the lifetime of the program,
+                    // the address of which is decided at link time.
+                    Constant::None
                 }
-                _ => None,
+                _ => Constant::None,
             };
             if constant.is_some() {
                 var_decl = var_decl.with_constant(constant);
@@ -383,11 +414,11 @@ impl ProgramPoint {
                     VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                         .with_enclosing_var(Some(name.clone()));
                 if is_uninit {
-                    len_decl.set_constant(Some("UNINITIALIZED".to_string()));
+                    len_decl.set_constant(Constant::Uninit);
                 }
 
                 if let (Some(src), Some(n)) = (const_source, static_count) {
-                    len_decl.set_constant(Some(n.to_string()));
+                    len_decl.set_constant(Constant::Numeric(n.to_string()));
 
                     for i in 0..n {
                         let child_src = src.project_field(tcx, ty, i as usize);
@@ -436,11 +467,11 @@ impl ProgramPoint {
                     VariableDecl::new(VarKind::Field(FIELD_LENGTH.to_string()), DecType::Usize)
                         .with_enclosing_var(Some(name.clone()));
                 if is_uninit {
-                    len_decl.set_constant(Some("UNINITIALIZED".to_string()));
+                    len_decl.set_constant(Constant::Uninit);
                 }
 
                 if let (Some(src), Some(n)) = (const_source, slice_len) {
-                    len_decl.set_constant(Some(n.to_string()));
+                    len_decl.set_constant(Constant::Numeric(n.to_string()));
 
                     for i in 0..n {
                         let child_src = src.project_slice_elem(tcx, *inner, i);
@@ -623,10 +654,11 @@ impl ProgramPoint {
             }
 
             if is_uninit {
-                var_decl = var_decl.with_constant(Some("UNINITIALIZED".to_string()));
+                var_decl = var_decl.with_constant(Constant::Uninit);
             }
 
-            self.variables.insert(escape_str(len_name.into_string()), var_decl);
+            self.variables
+                .insert(escape_str(len_name.into_string()), var_decl);
 
             let elem_ty = adt_generics[0]
                 .as_type()

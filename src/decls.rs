@@ -2,7 +2,7 @@ use std::io::Write;
 
 use crate::{
     VarName, callbacks,
-    fields::{DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
+    fields::{Constant, DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
     ppt::ProgramPoint, vars::escape_str,
 };
 
@@ -155,7 +155,7 @@ impl DeclsFile {
                 let mut dec_type: Option<DecType> = None;
                 let mut enclosing_var: Option<String> = None;
                 let mut array: Option<u8> = None;
-                let mut constant: Option<String> = None;
+                let mut constant: Constant = Constant::None;
                 let mut comparability: Option<i64> = None;
 
                 while let Some(field_line) = lines.peek() {
@@ -198,7 +198,7 @@ impl DeclsFile {
                                 .map_err(|_| DeclsFileParseError::MalformedPpt)?,
                         );
                     } else if let Some(rest) = trimmed.strip_prefix("constant ") {
-                        constant = Some(rest.to_string());
+                        constant = rest.into();
                     } else if let Some(rest) = trimmed.strip_prefix("comparability ") {
                         let v: i64 = rest
                             .parse()
@@ -304,12 +304,74 @@ impl DeclsFile {
         self.ppts.range_mut(lo..hi).map(|(_, p)| p).collect()
     }
 
-    pub fn get_program_point_mut(&mut self, name: &str) -> Option<&mut ProgramPoint> {
-        self.ppts.get_mut(name)
+    /// Fetch the ENTER program point for the function/method identified by
+    /// `ldid`.
+    pub fn enter_ppt<'tcx>(
+        &self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+    ) -> Option<&ProgramPoint> {
+        let base = Self::ppt_base_name(tcx, ldid);
+        self.ppts.get(&format!("{base}:::ENTER"))
     }
 
-    pub fn get_program_point(&self, name: &str) -> Option<&ProgramPoint> {
-        self.ppts.get(name)
+    /// Fetch the ENTER program point for the function/method identified by
+    /// `ldid`.
+    pub fn enter_ppt_mut<'tcx>(
+        &mut self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+    ) -> Option<&mut ProgramPoint> {
+        let base = Self::ppt_base_name(tcx, ldid);
+        self.ppts.get_mut(&format!("{base}:::ENTER"))
+    }
+
+
+    /// Fetch the EXIT program point for the function/method identified by
+    /// `ldid`.
+    pub fn exit_ppt<'tcx>(
+        &self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+    ) -> Option<&ProgramPoint> {
+        let base = Self::ppt_base_name(tcx, ldid);
+        self.ppts.get(&format!("{base}:::EXIT"))
+    }
+
+    /// See `exit_ppt`.
+    pub fn exit_ppt_mut<'tcx>(
+        &mut self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+    ) -> Option<&mut ProgramPoint> {
+        let base = Self::ppt_base_name(tcx, ldid);
+        self.ppts.get_mut(&format!("{base}:::EXIT"))
+    }
+
+
+    /// Fetch the EXIT{id} (subexit) program point for the function/method
+    /// identified by `ldid`. The `id` matches the numeric suffix Daikon uses
+    /// to distinguish multiple return points within the same function.
+    /// Use `ppts_for` instead if you want every subexit at once.
+    pub fn exitnn_ppt<'tcx>(
+        &self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+        id: u64,
+    ) -> Option<&ProgramPoint> {
+        let base = Self::ppt_base_name(tcx, ldid);
+        self.ppts.get(&format!("{base}:::EXIT{id}"))
+    }
+
+    /// See `exitnn_ppt`.
+    pub fn exitnn_ppt_mut<'tcx>(
+        &mut self,
+        tcx: rustc_middle::ty::TyCtxt<'tcx>,
+        ldid: rustc_hir::def_id::LocalDefId,
+        id: u64,
+    ) -> Option<&mut ProgramPoint> {
+        let base = Self::ppt_base_name(tcx, ldid);
+        self.ppts.get_mut(&format!("{base}:::EXIT{id}"))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&std::string::String, &ProgramPoint)> {
