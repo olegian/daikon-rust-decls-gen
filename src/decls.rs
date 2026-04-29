@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{
     VarName, callbacks,
     fields::{DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
-    ppt::ProgramPoint,
+    ppt::ProgramPoint, vars::escape_str,
 };
 
 // include header information as well?
@@ -271,7 +271,7 @@ impl DeclsFile {
     ) -> String {
         let file = file_name_of(tcx, tcx.def_span(ldid));
         let path = tcx.def_path_str(ldid);
-        format!("{file}::{path}")
+        escape_str(format!("{file}::{path}"))
     }
 
     /// Compute the variable key used to look up a VariableDecl inside a

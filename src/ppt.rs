@@ -2,7 +2,7 @@ use crate::{
     decls::{FIELD_LENGTH, RETURN_VAR_NAME},
     fields::{DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
     globals::{ConstSource, Global},
-    vars::VarName,
+    vars::{VarName, escape_str},
 };
 
 #[derive(Debug)]
@@ -320,7 +320,8 @@ impl ProgramPoint {
             }
         }
 
-        self.variables.insert(name.as_str().to_string(), var_decl);
+        self.variables
+            .insert(escape_str(name.as_str().to_string()), var_decl);
 
         match ty.kind() {
             // impossible, we peeled all refs already.
@@ -401,7 +402,8 @@ impl ProgramPoint {
                     );
                 }
 
-                self.variables.insert(len_name.into_string(), len_decl);
+                self.variables
+                    .insert(escape_str(len_name.into_string()), len_decl);
             }
 
             // Slices. Handled very similarly to arrays, see above
@@ -448,7 +450,8 @@ impl ProgramPoint {
                     );
                 }
 
-                self.variables.insert(len_name.into_string(), len_decl);
+                self.variables
+                    .insert(escape_str(len_name.into_string()), len_decl);
             }
 
             // Tuples emit a var decl per field.
@@ -586,7 +589,8 @@ impl ProgramPoint {
             if in_array {
                 var_decl = var_decl.with_array(Some(1));
             }
-            self.variables.insert(len_name.into_string(), var_decl);
+            self.variables
+                .insert(escape_str(len_name.into_string()), var_decl);
 
             let elem_ty = adt_generics[0]
                 .as_type()

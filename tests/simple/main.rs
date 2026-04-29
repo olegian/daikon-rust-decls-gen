@@ -1,5 +1,6 @@
 mod dep;
 
+#[derive(Debug)]
 struct MyStruct<T>(u32, T);
 impl<T> MyStruct<T> {
     fn bar(&self, param: T) {

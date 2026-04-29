@@ -70,3 +70,11 @@ impl From<VarName> for String {
         v.0
     }
 }
+
+/// Replaces necessary chars in string with corresponding escape
+/// sequences.
+/// "In the declaration file, blanks must be replaced by \_, 
+/// and backslashes must be escaped as \\."
+pub fn escape_str(s: String) -> String {
+    s.replace("\\", "\\\\").replace(" ", "\\_")
+}
