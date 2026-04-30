@@ -21,6 +21,6 @@ mod ppt;
 pub mod decls;
 pub mod vars;
 pub use decls::{DeclsFile, VarIdent};
-pub use fields::{Constant, VariableDecl};
+pub use fields::{Constant, VariableDecl, ProgramPointType};
 pub use ppt::ProgramPoint;
 pub use vars::VarName;
