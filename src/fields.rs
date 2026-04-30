@@ -321,6 +321,10 @@ impl VariableDecl {
         self.comparability = comp;
     }
 
+    pub fn get_comparability(&self) -> &Option<u64> {
+        &self.comparability
+    }
+
     /// Returns true iff this declaration carries a `constant` tag of any kind.
     pub fn is_constant(&self) -> bool {
         self.constant.is_some()
