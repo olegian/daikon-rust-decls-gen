@@ -100,6 +100,15 @@ impl ProgramPoint {
         self.variables.get_mut(&escape_str(name))
     }
 
+    pub fn iter_vars(&self) -> impl Iterator<Item=(&String, &VariableDecl)> {
+        self.variables.iter()
+    }
+
+    pub fn iter_vars_mut(&mut self) -> impl Iterator<Item=(&String, &mut VariableDecl)> {
+        self.variables.iter_mut()
+    }
+
+
     /// Register the program point with name `parent_ppt` as a parent of
     /// this program point, with the given relation type and id.
     pub fn with_parent(
