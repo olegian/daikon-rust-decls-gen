@@ -70,6 +70,10 @@ impl ProgramPoint {
         }
     }
 
+    pub fn get_type(&self) -> &ProgramPointType {
+        &self.ppt_type
+    }
+
     /// Look up the `VariableDecl` for a parameter (`VarIdent::Local`), the
     /// return value (`VarIdent::Return`), or a global / `const` / `static`
     /// item (`VarIdent::Global(did)`) reachable from this program point.
