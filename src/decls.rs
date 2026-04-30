@@ -157,7 +157,7 @@ impl DeclsFile {
                 let mut enclosing_var: Option<String> = None;
                 let mut array: Option<u8> = None;
                 let mut constant: Constant = Constant::None;
-                let mut comparability: Option<i64> = None;
+                let mut comparability: Option<u64> = None;
 
                 while let Some(field_line) = lines.peek() {
                     let trimmed = field_line.trim_start();
@@ -201,10 +201,10 @@ impl DeclsFile {
                     } else if let Some(rest) = trimmed.strip_prefix("constant ") {
                         constant = rest.into();
                     } else if let Some(rest) = trimmed.strip_prefix("comparability ") {
-                        let v: i64 = rest
+                        let v: i128 = rest
                             .parse()
                             .map_err(|_| DeclsFileParseError::MalformedPpt)?;
-                        comparability = if v < 0 { None } else { Some(v) };
+                        comparability = if v < 0 { None } else { Some(v as u64) };
                     } else {
                         return Err(DeclsFileParseError::MalformedPpt);
                     }

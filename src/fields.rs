@@ -278,7 +278,7 @@ pub struct VariableDecl {
     enclosing_var: Option<VarName>,
     array: Option<u8>,
     constant: Constant,
-    comparability: Option<i64>,
+    comparability: Option<u64>,
 }
 
 impl VariableDecl {
@@ -312,12 +312,12 @@ impl VariableDecl {
         self.constant = constant;
     }
 
-    pub fn with_comparability(mut self, comp: Option<i64>) -> Self {
+    pub fn with_comparability(mut self, comp: Option<u64>) -> Self {
         self.comparability = comp;
         self
     }
 
-    pub fn set_comparability(&mut self, comp: Option<i64>) {
+    pub fn set_comparability(&mut self, comp: Option<u64>) {
         self.comparability = comp;
     }
 
@@ -353,7 +353,8 @@ impl std::fmt::Display for VariableDecl {
         if self.constant.is_some() {
             writeln!(f, "  constant {}", self.constant)?;
         }
-        writeln!(f, "  comparability {}", self.comparability.unwrap_or(-1))?;
+        // kind of a gross cast,
+        writeln!(f, "  comparability {}", self.comparability.map_or(-1, |comp| comp as i128))?;
         Ok(())
     }
 }
