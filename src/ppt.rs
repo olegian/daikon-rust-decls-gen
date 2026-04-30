@@ -440,6 +440,8 @@ impl ProgramPoint {
 
                 if let (Some(src), Some(n)) = (const_source, static_count) {
                     len_decl.set_constant(Constant::Numeric(n.to_string()));
+                    self.variables
+                        .insert(escape_str(len_name.into_string()), len_decl);
 
                     for i in 0..n {
                         let child_src = src.project_field(tcx, ty, i as usize);
@@ -458,10 +460,12 @@ impl ProgramPoint {
                         );
                     }
                 } else {
+                    self.variables
+                        .insert(escape_str(len_name.into_string()), len_decl);
+
                     if in_array {
                         return;
                     }
-
                     let elem_name = name.project_slice();
                     self.add_var(
                         tcx,
@@ -475,9 +479,6 @@ impl ProgramPoint {
                         is_uninit,
                     );
                 }
-
-                self.variables
-                    .insert(escape_str(len_name.into_string()), len_decl);
             }
 
             // Slices. Handled very similarly to arrays, see above
@@ -661,10 +662,6 @@ impl ProgramPoint {
             // p.length  <-- varkind field
             // p[..]  <-- varkind array
 
-            if in_array {
-                // see array handling in self.add_var
-                return;
-            }
 
             let len_name = name.project_field(FIELD_LENGTH);
             let mut var_decl =
@@ -680,6 +677,11 @@ impl ProgramPoint {
 
             self.variables
                 .insert(escape_str(len_name.into_string()), var_decl);
+
+            if in_array {
+                // see array handling in self.add_var
+                return;
+            }
 
             let elem_ty = adt_generics[0]
                 .as_type()
