@@ -3,7 +3,8 @@ use std::io::Write;
 use crate::{
     VarName, callbacks,
     fields::{Constant, DecType, ParentRelationType, ProgramPointType, VarKind, VariableDecl},
-    ppt::ProgramPoint, vars::escape_str,
+    ppt::ProgramPoint,
+    vars::escape_str,
 };
 
 // include header information as well?
@@ -261,6 +262,7 @@ impl DeclsFile {
     pub fn add_program_point(&mut self, name: String, ppt: ProgramPoint) {
         self.ppts.insert(name, ppt);
     }
+
     /// Compute the fully qualified base ppt name for a function or method,
     /// without any `:::ENTER` / `:::EXIT` / `:::EXIT{N}` suffix.
     /// Can be used to query for all ENTER/EXIT/EXITNN ppts that correspond
@@ -272,6 +274,13 @@ impl DeclsFile {
         let file = file_name_of(tcx, tcx.def_span(ldid));
         let path = tcx.def_path_str(ldid);
         escape_str(format!("{file}::{path}"))
+    }
+
+    pub fn strip_ppt_type<'a>(full_ppt_name: &'a str) -> &'a str {
+        full_ppt_name.split(":::").next().expect(&format!(
+            "Unable to get base ppt name of {:?}",
+            full_ppt_name
+        ))
     }
 
     /// Compute the variable key used to look up a VariableDecl inside a
@@ -304,51 +313,41 @@ impl DeclsFile {
         self.ppts.range_mut(lo..hi).map(|(_, p)| p).collect()
     }
 
+    pub fn get_ppt(&self, full_ppt_name: &str) -> Option<&ProgramPoint> {
+        self.ppts.get(full_ppt_name)
+    }
+
+    pub fn get_ppt_mut(&mut self, full_ppt_name: &str) -> Option<&mut ProgramPoint> {
+        self.ppts.get_mut(full_ppt_name)
+    }
+
     /// Fetch the ENTER program point for the function/method identified by
     /// base program point name.
-    pub fn enter_ppt<'tcx>(
-        &self,
-        base_ppt_name: &str,
-    ) -> Option<&ProgramPoint> {
+    pub fn enter_ppt<'tcx>(&self, base_ppt_name: &str) -> Option<&ProgramPoint> {
         self.ppts.get(&format!("{}:::ENTER", base_ppt_name))
     }
 
     /// See `enter_ppt`
-    pub fn enter_ppt_mut<'tcx>(
-        &mut self,
-        base_ppt_name: &str,
-    ) -> Option<&mut ProgramPoint> {
+    pub fn enter_ppt_mut<'tcx>(&mut self, base_ppt_name: &str) -> Option<&mut ProgramPoint> {
         self.ppts.get_mut(&format!("{}:::ENTER", base_ppt_name))
     }
 
-
     /// Fetch the EXIT program point for the function/method identified by
     /// base program point name.
-    pub fn exit_ppt<'tcx>(
-        &self,
-        base_ppt_name: &str,
-    ) -> Option<&ProgramPoint> {
+    pub fn exit_ppt<'tcx>(&self, base_ppt_name: &str) -> Option<&ProgramPoint> {
         self.ppts.get(&format!("{}:::EXIT", base_ppt_name))
     }
 
     /// See `exit_ppt`.
-    pub fn exit_ppt_mut<'tcx>(
-        &mut self,
-        base_ppt_name: &str,
-    ) -> Option<&mut ProgramPoint> {
+    pub fn exit_ppt_mut<'tcx>(&mut self, base_ppt_name: &str) -> Option<&mut ProgramPoint> {
         self.ppts.get_mut(&format!("{}:::EXIT", base_ppt_name))
     }
-
 
     /// Fetch the EXIT{id} (subexit) program point for the function/method
     /// identified by base_ppt_name. The `id` matches the numeric suffix Daikon uses
     /// to distinguish multiple return points within the same function.
     /// Use `ppts_for` instead if you want every subexit at once.
-    pub fn exitnn_ppt<'tcx>(
-        &self,
-        base_ppt_name: &str,
-        id: u64,
-    ) -> Option<&ProgramPoint> {
+    pub fn exitnn_ppt<'tcx>(&self, base_ppt_name: &str, id: u64) -> Option<&ProgramPoint> {
         self.ppts.get(&format!("{}:::EXIT{id}", base_ppt_name))
     }
 
@@ -360,7 +359,6 @@ impl DeclsFile {
     ) -> Option<&mut ProgramPoint> {
         self.ppts.get_mut(&format!("{}:::EXIT{id}", base_ppt_name))
     }
-
 
     /// Fetch the ENTER program point for the function/method identified by
     /// `ldid`.
@@ -383,7 +381,6 @@ impl DeclsFile {
         self.ppts.get_mut(&format!("{base}:::ENTER"))
     }
 
-
     /// Fetch the EXIT program point for the function/method identified by
     /// `ldid`.
     pub fn exit_ppt_by_id<'tcx>(
@@ -404,7 +401,6 @@ impl DeclsFile {
         let base = Self::ppt_base_name(tcx, ldid);
         self.ppts.get_mut(&format!("{base}:::EXIT"))
     }
-
 
     /// Fetch the EXIT{id} (subexit) program point for the function/method
     /// identified by `ldid`. The `id` matches the numeric suffix Daikon uses
