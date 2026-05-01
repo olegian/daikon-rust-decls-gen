@@ -77,7 +77,7 @@ pub enum DecType {
 }
 
 impl DecType {
-    fn to_rep_type(&self, array: Option<u8>) -> String {
+    pub fn to_rep_type(&self, array: Option<u8>) -> String {
         let base = match self {
             DecType::U8
             | DecType::U16
@@ -323,6 +323,10 @@ impl VariableDecl {
 
     pub fn get_comparability(&self) -> &Option<u64> {
         &self.comparability
+    }
+
+    pub fn get_dec_type(&self) -> &DecType {
+        &self.dec_type
     }
 
     /// Returns true iff this declaration carries a `constant` tag of any kind.
